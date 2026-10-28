@@ -1272,6 +1272,46 @@ p {
   min-width: 0;
 }
 
+/*
+ * A text-only highlight mirror. The inline span owns the colour, so it paints
+ * the glyph line boxes rather than the textarea's full content width. Multiply
+ * blending lets the real text and its selection show through the colour.
+ */
+.block__editor > .block__highlight.block__input[aria-hidden='true'] {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  text-decoration: none;
+  pointer-events: none;
+  user-select: none;
+  mix-blend-mode: multiply;
+}
+
+.block__highlight-text {
+  padding-block: 0.04em;
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.history-block__highlight {
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+@supports not (mix-blend-mode: multiply) {
+  .block__highlight {
+    display: none;
+  }
+}
+
 .remote-caret {
   position: absolute;
   z-index: 5;

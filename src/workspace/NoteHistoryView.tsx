@@ -248,7 +248,16 @@ function HistoryBlock({
               className={`block__input history-block__text history-block__text--${block.type}`}
               style={formatTextStyle(block.format)}
             >
-              {parts.length ? renderParts(parts) : '\u200b'}
+              <span
+                className={block.format.highlight ? 'history-block__highlight' : undefined}
+                style={
+                  block.format.highlight
+                    ? { backgroundColor: block.format.highlight }
+                    : undefined
+                }
+              >
+                {parts.length ? renderParts(parts) : '\u200b'}
+              </span>
             </div>
             {label ? <span className="history-block__note">{label}</span> : null}
           </div>

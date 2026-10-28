@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef } from 'react'
 import type * as Y from 'yjs'
 import { blockArray, blockTextNode, blockView, applyTextEdit } from '../sync/noteModel'
-import { formatSignature, formatTextStyle } from '../lib/formatting'
+import { formatSignature, formatTextMetrics, formatTextStyle } from '../lib/formatting'
 import type { BlockType } from '../lib/types'
 import { RemoteCarets } from './RemoteCaret'
 import { filterSlash } from './SlashMenu'
@@ -570,6 +570,21 @@ export function BlockRow({
       ) : null}
 
       <div className="block__editor">
+        {view.format.highlight && view.text ? (
+          <div
+            className={`block__highlight block__input block__input--${view.type}`}
+            style={formatTextMetrics(view.format)}
+            aria-hidden="true"
+          >
+            <span
+              className="block__highlight-text"
+              style={{ backgroundColor: view.format.highlight }}
+            >
+              {view.text}
+            </span>
+          </div>
+        ) : null}
+
         <RemoteCarets
           textareaRef={textareaRef}
           text={view.text}

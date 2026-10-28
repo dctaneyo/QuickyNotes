@@ -104,22 +104,30 @@ export function isDefaultBlockFormat(format: BlockFormat): boolean {
   )
 }
 
-/** Inline textarea styles. Backgrounds paint the block band, never the carets. */
+/**
+ * Typography that must match exactly between the editable textarea and the
+ * text-only highlight layer behind the glyphs.
+ */
+export function formatTextMetrics(format: BlockFormat): CSSProperties {
+  return {
+    fontWeight: format.bold ? 700 : undefined,
+    fontStyle: format.italic ? 'italic' : undefined,
+    fontSize: format.fontSize ? `${format.fontSize}px` : undefined,
+  }
+}
+
+/** Inline text styles; highlights are painted by a text-only mirror. */
 export function formatTextStyle(format: BlockFormat): CSSProperties {
   const decorations = [format.underline ? 'underline' : '', format.strike ? 'line-through' : '']
     .filter(Boolean)
     .join(' ')
   return {
-    fontWeight: format.bold ? 700 : undefined,
-    fontStyle: format.italic ? 'italic' : undefined,
+    ...formatTextMetrics(format),
     textDecorationLine: decorations || undefined,
     textDecorationThickness: decorations ? '0.07em' : undefined,
     textUnderlineOffset: format.underline ? '0.16em' : undefined,
-    fontSize: format.fontSize ? `${format.fontSize}px` : undefined,
     color: format.color ?? undefined,
     caretColor: format.color ?? undefined,
-    backgroundColor: format.highlight ?? undefined,
-    borderRadius: format.highlight ? '4px' : undefined,
   }
 }
 
