@@ -56,18 +56,13 @@ export function dayLabel(key: string): string {
   return formatDayShort(key)
 }
 
-export function formatDue(due: string): string {
-  const today = todayKey()
-  if (due === today) return 'Today'
-  if (due < today) return `Overdue · ${formatDayShort(due)}`
-  return formatDayShort(due)
+export function shiftDay(key: string, days: number): string {
+  const date = parseDay(key)
+  date.setDate(date.getDate() + days)
+  return dateKey(date)
 }
 
-export function isOverdue(due: string | null): boolean {
-  return !!due && due < todayKey()
-}
-
-/** Twos groups notes by the day they belong to; a due date wins over creation. */
+/** Every note belongs to a day; `due` stores it, creation day is the fallback. */
 export function noteDay(note: NoteSummary): string {
   return note.due ?? dateKey(new Date(note.createdAt))
 }

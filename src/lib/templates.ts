@@ -1,4 +1,4 @@
-import type { BlockType, NoteSummary } from './types'
+import type { BlockType } from './types'
 
 export interface TemplateBlock {
   type: BlockType
@@ -12,7 +12,6 @@ export interface NoteTemplate {
   blurb: string
   glyph: string
   tags: string[]
-  dueToday?: boolean
   title?: (date: Date) => string
   blocks: TemplateBlock[]
 }
@@ -39,7 +38,6 @@ export const TEMPLATES: NoteTemplate[] = [
     blurb: 'Three things, then whatever else.',
     glyph: '☀',
     tags: ['daily'],
-    dueToday: true,
     title: longDate,
     blocks: [
       { type: 'h2', text: 'Three things for today' },
@@ -88,24 +86,4 @@ export const TEMPLATES: NoteTemplate[] = [
 
 export function templateById(id: string): NoteTemplate {
   return TEMPLATES.find((template) => template.id === id) ?? TEMPLATES[0]
-}
-
-export function quickCaptureSummary(id: string, text: string, ownerId: string, ownerName: string): NoteSummary {
-  const now = Date.now()
-  return {
-    id,
-    title: text.slice(0, 120),
-    due: null,
-    tags: [],
-    starred: false,
-    trashed: false,
-    createdAt: now,
-    updatedAt: now,
-    ownerId,
-    ownerName,
-    role: 'owner',
-    memberCount: 1,
-    text: '',
-    pending: true,
-  }
 }

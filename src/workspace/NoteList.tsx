@@ -1,17 +1,14 @@
 import { useState } from 'react'
 import type { RefObject } from 'react'
-import type { NoteSummary, SyncState } from '../lib/types'
+import type { NoteSummary } from '../lib/types'
 import {
   dayLabel,
   effectiveTitle,
   formatDayShort,
-  formatDue,
   formatTime,
   groupByDay,
-  isOverdue,
   noteSnippet,
 } from '../lib/notes'
-import { ConnectionBadge } from '../components/ConnectionBadge'
 import { SearchIcon, StarIcon, XIcon } from '../components/Icons'
 
 interface NoteListProps {
@@ -26,10 +23,7 @@ interface NoteListProps {
   onCapture: (text: string) => void
   onDeleteForever: (id: string) => void
   onOpenDrawer: () => void
-  status: SyncState
-  synced: boolean
   syncing: boolean
-  onRetry: () => void
   trashView: boolean
 }
 
@@ -45,10 +39,7 @@ export function NoteList({
   onCapture,
   onDeleteForever,
   onOpenDrawer,
-  status,
-  synced,
   syncing,
-  onRetry,
   trashView,
 }: NoteListProps) {
   const [draft, setDraft] = useState('')
@@ -86,7 +77,6 @@ export function NoteList({
           <span className="list__count mono">{notes.length}</span>
         </div>
         <div className="list__head-actions">
-          <ConnectionBadge status={status} synced={synced} onRetry={onRetry} compact />
           <button type="button" className="btn btn--icon" onClick={onNew} aria-label="New note">
             <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
               <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -99,7 +89,9 @@ export function NoteList({
         <SearchIcon size={16} />
         <input
           ref={searchRef}
-          type="search"
+          type="text"
+          inputMode="search"
+          autoComplete="off"
           value={search}
           placeholder="Search every note…"
           aria-label="Search notes"
@@ -187,11 +179,6 @@ export function NoteList({
                     {note.starred ? (
                       <span className="row__star">
                         <StarIcon size={13} filled />
-                      </span>
-                    ) : null}
-                    {note.due ? (
-                      <span className={`chip${isOverdue(note.due) ? ' chip--warn' : ''}`}>
-                        {formatDue(note.due)}
                       </span>
                     ) : null}
                   </span>

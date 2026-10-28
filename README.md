@@ -26,10 +26,13 @@ WebSocket sync server and the built client — so it deploys as a single Railway
   code and dividers.
 - Slash menu (`/`) for block types, markdown shortcuts (`# `, `- `, `[] `, `> `, ` ``` `), Tab to
   indent, Alt+↑/↓ to move a block, drag handle to reorder, undo/redo with `⌘Z`.
-- Tags, due dates, star, trash and restore.
-- Views: Today, a month calendar that filters by day, All notes, Starred, Reminders (due or
-  overdue), tags, and Trash.
+- Every note belongs to a day. New notes start on today, and **Move** re-files one to another
+  day; the Today view, day groups and calendar follow it. There is no deadline or overdue state.
+- Tags, star, trash and restore.
+- Views: Today, a month calendar that filters by day, All notes, Starred, tags, and Trash.
 - Search across titles, body text and tags — works from the local cache while offline.
+- **Tidy blank lines** in the note menu removes empty text blocks in one undoable step; empty
+  to-dos, headings and dividers are left alone.
 - Templates and a daily note (`Blank`, `Daily`, `Meeting`, `Project`), plus quick capture from the
   list.
 
@@ -40,7 +43,7 @@ WebSocket sync server and the built client — so it deploys as a single Railway
 - Text sync is a Yjs CRDT over a WebSocket per note, so two people can type in the same block
   without overwriting each other.
 - Presence: avatars in the note header and a coloured marker on the block someone is editing.
-- A live connection badge (Synced / Reconnecting / Offline) in the sidebar, list and editor.
+- A live connection badge (Synced / Reconnecting / Offline) in the note header.
 
 **Offline**
 
@@ -124,8 +127,6 @@ src/
 - Table/database blocks (Notion-style properties and views) are **not** implemented yet.
 - Inline bold/italic is not exposed; formatting is block-level. Paste is plain text.
 - Presence is per block, not a character-level remote caret.
-- Reminders appear in the Reminders view and overdue banners; there are no push notifications while
-  the app is closed.
 - Attachments, comments and version history are not built.
 - A 6-digit PIN is only 1,000,000 combinations: lockout, throttling and HTTPS are what make it
   acceptable. Add a second factor before exposing this publicly at scale.

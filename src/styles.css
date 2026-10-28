@@ -163,6 +163,15 @@ p {
   background: var(--surface-2);
 }
 
+.btn--danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn--danger:hover {
+  background: #b03a2b;
+}
+
 .btn--full {
   width: 100%;
 }
@@ -584,12 +593,8 @@ p {
 }
 
 @media (max-width: 760px) {
-  .conn--compact .conn__label {
-    display: none;
-  }
-
   .conn--compact {
-    padding: 0 7px;
+    padding: 0 8px;
   }
 }
 
@@ -859,23 +864,6 @@ p {
   flex: 0 0 auto;
 }
 
-.chip {
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: var(--surface-2);
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
-}
-
-.chip--warn {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border-color: #f2d2cb;
-}
-
 .row__snippet {
   font-size: 12.5px;
   color: var(--muted);
@@ -1080,9 +1068,9 @@ p {
 
 .note__meta {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 18px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
   margin-top: 14px;
 }
 
@@ -1108,47 +1096,70 @@ p {
 }
 
 .date-row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   flex-wrap: wrap;
 }
 
-.date-field {
+.day-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 9px;
   border-radius: 7px;
   border: 1px solid var(--line);
   background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 11.5px;
+}
+
+.day-chip svg {
   color: var(--muted);
 }
 
-.date-field input {
-  border: 0;
-  outline: none;
-  background: transparent;
+.day-chip__date {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.day-move {
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--ink-soft);
-  width: 104px;
-}
-
-.date-field.is-overdue {
-  border-color: #f0ccc5;
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.date-field.is-overdue input {
-  color: var(--danger);
-}
-
-.date-clear {
-  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--muted);
+}
+
+.day-move:hover {
+  color: var(--ink);
+}
+
+.day-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 21;
+  width: min(264px, calc(100vw - 48px));
+  padding: 12px 12px 6px;
+  display: grid;
+  gap: 8px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.day-pop .cal {
+  padding: 0;
+}
+
+.day-pop .cal__day {
+  height: 30px;
+  font-size: 11.5px;
 }
 
 .note__body {
@@ -1188,17 +1199,20 @@ p {
 
 .block__gutter {
   position: absolute;
-  left: -62px;
-  top: 1px;
+  top: 2px;
+  right: -28px;
   display: flex;
+  flex-direction: column;
   gap: 1px;
   opacity: 0;
-  transition: opacity 0.14s var(--ease);
+  visibility: hidden;
+  transition: opacity 0.14s var(--ease), visibility 0.14s var(--ease);
 }
 
 .block:hover .block__gutter,
 .block:focus-within .block__gutter {
   opacity: 1;
+  visibility: visible;
 }
 
 .gutter-btn {
@@ -1330,6 +1344,8 @@ p {
   width: 18px;
   height: 18px;
   margin-top: 6px;
+  padding: 0;
+  line-height: 0;
   border-radius: 5px;
   border: 1.5px solid var(--line-strong);
   background: var(--surface);
@@ -2450,10 +2466,6 @@ kbd {
     display: inline-flex;
   }
 
-  .block__gutter {
-    left: -54px;
-  }
-
   .auth__slip {
     display: none;
   }
@@ -2588,13 +2600,12 @@ kbd {
   }
 
   .note__meta {
-    gap: 10px;
+    gap: 8px;
     margin-top: 12px;
   }
 
-  .date-field input {
-    width: 108px;
-    font-size: 11px;
+  .day-pop {
+    width: min(264px, calc(100vw - 40px));
   }
 
   .block {
@@ -2613,10 +2624,10 @@ kbd {
   .block__gutter {
     position: static;
     opacity: 1;
+    visibility: visible;
     order: 3;
     margin-left: auto;
     padding-top: 3px;
-    flex-direction: column;
   }
 
   .block__gutter .gutter-btn {
@@ -2690,10 +2701,6 @@ kbd {
 
   .toast {
     bottom: calc(86px + env(safe-area-inset-bottom));
-  }
-
-  .conn--compact .conn__label {
-    display: none;
   }
 
   .note__bar-actions .icon-btn {

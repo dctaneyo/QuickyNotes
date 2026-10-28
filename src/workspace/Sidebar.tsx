@@ -1,10 +1,8 @@
-import type { Filter, SyncState, ViewId } from '../lib/types'
+import type { Filter, ViewId } from '../lib/types'
 import type { SessionUser } from '../lib/api'
 import type { Peer } from '../sync/useNoteSync'
 import { Calendar } from './Calendar'
-import { ConnectionBadge } from '../components/ConnectionBadge'
 import {
-  CalendarIcon,
   NotesIcon,
   StarIcon,
   SunIcon,
@@ -21,11 +19,8 @@ interface SidebarProps {
   markers: Set<string>
   selectedDay: string | null
   user: SessionUser
-  status: SyncState
-  synced: boolean
   peers: Peer[]
   syncing: boolean
-  onRetry: () => void
   onFilter: (filter: Filter) => void
   onSelectDay: (date: string) => void
   onNew: () => void
@@ -38,7 +33,6 @@ const VIEW_ITEMS: { id: ViewId; label: string; Icon: typeof SunIcon }[] = [
   { id: 'today', label: 'Today', Icon: SunIcon },
   { id: 'all', label: 'All notes', Icon: NotesIcon },
   { id: 'starred', label: 'Starred', Icon: StarIcon },
-  { id: 'reminders', label: 'Reminders', Icon: CalendarIcon },
   { id: 'trash', label: 'Trash', Icon: TrashIcon },
 ]
 
@@ -49,11 +43,8 @@ export function Sidebar({
   markers,
   selectedDay,
   user,
-  status,
-  synced,
   peers,
   syncing,
-  onRetry,
   onFilter,
   onSelectDay,
   onNew,
@@ -166,8 +157,6 @@ export function Sidebar({
             <span className="sidebar__presence-label">Just you, for now</span>
           )}
         </div>
-
-        <ConnectionBadge status={status} synced={synced} onRetry={onRetry} />
 
         <button type="button" className="userchip" onClick={onSettings}>
           <span className="avatar" style={{ background: colorFor(user.userId) }}>

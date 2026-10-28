@@ -2,10 +2,11 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import type { Member, NoteSummary, SyncState } from '../lib/types'
 import {
+  dateKey,
   dayLabel,
+  formatDayShort,
   formatTime,
   initials,
-  isOverdue,
   normalizeTag,
   noteDay,
 } from '../lib/notes'
@@ -24,11 +25,13 @@ import {
 import type { Peer } from '../sync/useNoteSync'
 import { BlockRow, type BlockRowApi, type FocusRequest, type SlashState } from './BlockRow'
 import { SlashMenu, filterSlash } from './SlashMenu'
+import { Calendar } from './Calendar'
 import { ConnectionBadge } from '../components/ConnectionBadge'
 import { CalendarIcon, DotsIcon, ShareIcon, StarIcon } from '../components/Icons'
 import type { BlockType } from '../lib/types'
 
 const noop = () => undefined
+const NO_MARKERS = new Set<string>()
 
 interface NoteEditorProps {
   summary: NoteSummary
@@ -71,6 +74,7 @@ export function NoteEditor({
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [moving, setMoving] = useState(false)
   const [tagDraft, setTagDraft] = useState('')
   const [titleDraft, setTitleDraft] = useState(() => noteMeta(doc).title)
   const titleRef = useRef<HTMLInputElement>(null)
@@ -81,6 +85,9 @@ export function NoteEditor({
   summaryChangeRef.current = onSummaryChange
 
   const meta = noteMeta(doc)
+  const noteDate = meta.due ?? dateKey(new Date(meta.createdAt))
+  const dayName = dayLabel(noteDate)
+  const dayStamp = formatDayShort(noteDate)
   const views = blockViews(doc)
   const plain = plainText(doc)
 
@@ -90,7 +97,6 @@ export function NoteEditor({
     const handler = () => bump()
     metaMap.observe(handler)
     blocks.observe(handler)
-    if (blocks.length === 0) createBlock(doc, 0, { type: 'text', text: '' })
     return () => {
       metaMap.unobserve(handler)
       blocks.unobserve(handler)
@@ -146,6 +152,15 @@ export function NoteEditor({
     if (document.activeElement === titleRef.current) return
     setTitleDraft(meta.title)
   }, [meta.title])
+
+  useEffect(() => {
+    if (!moving) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMoving(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [moving])
 
   useEffect(() => {
     if (!autoFocus) return
@@ -240,8 +255,32 @@ export function NoteEditor({
     patchMeta(doc, { tags: meta.tags.filter((value) => value !== tag) })
   }
 
-  const setDue = (value: string) => {
-    patchMeta(doc, { due: value || null })
+  const moveTo = (value: string) => {
+    if (!value) return
+    patchMeta(doc, { due: value })
+    setMoving(false)
+  }
+
+  const tidyBlankLines = () => {
+    const blocks = blockArray(doc)
+    const empties: number[] = []
+    blocks.forEach((block, index) => {
+      const view = blockView(block)
+      if (view.type === 'text' && !view.text.trim()) empties.push(index)
+    })
+    // Never leave a note without a block to type into.
+    const targets = empties.length === blocks.length ? empties.slice(1) : empties
+    setMenuOpen(false)
+    if (targets.length === 0) {
+      onToast('No blank lines to tidy')
+      return
+    }
+    doc.transact(() => {
+      for (let index = targets.length - 1; index >= 0; index -= 1) {
+        blocks.delete(targets[index], 1)
+      }
+    })
+    onToast(`Removed ${targets.length} blank ${targets.length === 1 ? 'line' : 'lines'}`)
   }
 
   const onUndoKeys = (event: React.KeyboardEvent) => {
@@ -362,6 +401,9 @@ export function NoteEditor({
                   >
                     Duplicate note
                   </button>
+                  <button type="button" className="menu__item" onClick={tidyBlankLines}>
+                    Tidy blank lines
+                  </button>
                   <button type="button" className="menu__item" onClick={trash}>
                     {meta.trashed ? 'Restore from trash' : 'Move to trash'}
                   </button>
@@ -426,6 +468,43 @@ export function NoteEditor({
           />
 
           <div className="note__meta">
+            <div className="date-row">
+              <span className="day-chip">
+                <CalendarIcon size={14} />
+                <span className="day-chip__label">{dayName}</span>
+                {dayName !== dayStamp ? (
+                  <span className="day-chip__date mono">{dayStamp}</span>
+                ) : null}
+              </span>
+              <button
+                type="button"
+                className="link day-move"
+                onClick={() => setMoving((value) => !value)}
+                aria-expanded={moving}
+                aria-haspopup="dialog"
+              >
+                Move
+              </button>
+              {moving ? (
+                <>
+                  <button
+                    type="button"
+                    className="menu-scrim"
+                    aria-label="Close date picker"
+                    onClick={() => setMoving(false)}
+                  />
+                  <div
+                    className="day-pop"
+                    role="dialog"
+                    aria-label="Move this note to another date"
+                  >
+                    <span className="eyebrow">Move note to</span>
+                    <Calendar selected={noteDate} markers={NO_MARKERS} onSelect={moveTo} />
+                  </div>
+                </>
+              ) : null}
+            </div>
+
             <div className="tag-row">
               {meta.tags.map((tag) => (
                 <span key={tag} className="tag">
@@ -452,23 +531,6 @@ export function NoteEditor({
                   }
                 }}
               />
-            </div>
-
-            <div className="date-row">
-              <label className={`date-field${isOverdue(meta.due) ? ' is-overdue' : ''}`}>
-                <CalendarIcon size={15} />
-                <input
-                  type="date"
-                  value={meta.due ?? ''}
-                  onChange={(event) => setDue(event.target.value)}
-                  aria-label="Due date"
-                />
-              </label>
-              {meta.due ? (
-                <button type="button" className="link date-clear" onClick={() => setDue('')}>
-                  Clear
-                </button>
-              ) : null}
             </div>
           </div>
         </div>

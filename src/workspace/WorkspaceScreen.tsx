@@ -10,7 +10,7 @@ import {
   todayKey,
   uid,
 } from '../lib/notes'
-import type { Filter, Member, ViewId } from '../lib/types'
+import type { Filter, Member, NoteSummary, ViewId } from '../lib/types'
 import { encodeSeed, blockViews, noteMeta } from '../sync/noteModel'
 import { useNoteSync } from '../sync/useNoteSync'
 import { useLobby } from '../sync/useLobby'
@@ -23,12 +23,12 @@ import { NoteEditor } from './NoteEditor'
 import { TemplateSheet } from './TemplateSheet'
 import { ShareDialog } from './ShareDialog'
 import { SettingsDialog } from './SettingsDialog'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 const VIEW_TITLES: Record<ViewId, string> = {
   today: 'Today',
   all: 'All notes',
   starred: 'Starred',
-  reminders: 'Reminders',
   trash: 'Trash',
 }
 
@@ -49,6 +49,7 @@ export function WorkspaceScreen() {
   const [shareOpen, setShareOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [members, setMembers] = useState<Member[] | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<NoteSummary | null>(null)
   const [membersLoading, setMembersLoading] = useState(false)
   const [membersError, setMembersError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -148,7 +149,6 @@ export function WorkspaceScreen() {
           if (note.trashed) return false
           if (filter.id === 'today') return noteDay(note) === todayKey()
           if (filter.id === 'starred') return note.starred
-          if (filter.id === 'reminders') return !!note.due && note.due <= todayKey()
           return true
         }
         if (filter.kind === 'day') return !note.trashed && noteDay(note) === filter.date
@@ -163,7 +163,6 @@ export function WorkspaceScreen() {
       today: active.filter((note) => noteDay(note) === todayKey()).length,
       all: active.length,
       starred: active.filter((note) => note.starred).length,
-      reminders: active.filter((note) => !!note.due && note.due <= todayKey()).length,
       trash: notes.filter((note) => note.trashed).length,
     }
   }, [notes])
@@ -216,7 +215,7 @@ export function WorkspaceScreen() {
     if (!user) return
     const template = templateById(templateId)
     const id = uid()
-    const due = template.dueToday ? todayKey() : null
+    const due = todayKey()
     const title = template.title ? template.title(new Date()) : ''
     const update = encodeSeed({
       ownerId: user.userId,
@@ -261,7 +260,7 @@ export function WorkspaceScreen() {
         ownerId: user.userId,
         title: text,
         tags: [],
-        due: null,
+        due: todayKey(),
         blocks: [{ type: 'text', text: '' }],
       }),
     )
@@ -269,7 +268,7 @@ export function WorkspaceScreen() {
     void index.registerNote({
       id,
       title: text,
-      due: null,
+      due: todayKey(),
       tags: [],
       starred: false,
       trashed: false,
@@ -298,7 +297,7 @@ export function WorkspaceScreen() {
       indent: block.indent,
     }))
     const id = uid()
-    const due = meta.due
+    const due = todayKey()
     const title = `${meta.title || effectiveTitle(selected)} copy`
     putSeed(
       id,
@@ -332,12 +331,16 @@ export function WorkspaceScreen() {
     showToast('Note duplicated')
   }
 
-  const deleteForever = (id: string) => {
+  const requestDelete = (id: string) => {
     const target = notes.find((note) => note.id === id)
-    if (!target) return
-    if (!window.confirm(`Delete “${effectiveTitle(target)}” forever? This cannot be undone.`)) return
-    void index.deleteForever(id)
-    if (selectedId === id) setSelectedId(null)
+    if (target) setPendingDelete(target)
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return
+    void index.deleteForever(pendingDelete.id)
+    if (selectedId === pendingDelete.id) setSelectedId(null)
+    setPendingDelete(null)
     showToast('Deleted forever')
   }
 
@@ -373,10 +376,6 @@ export function WorkspaceScreen() {
     showToast('You left this note')
   }
 
-  const status = selected ? sync.status : lobby.status
-  const synced = selected ? sync.synced : lobby.status === 'online'
-  const retry = selected ? sync.retry : lobby.retry
-
   return (
     <div className={`shell${selected ? ' is-editing' : ''}${drawerOpen ? ' is-drawer' : ''}`}>
       <Sidebar
@@ -386,11 +385,8 @@ export function WorkspaceScreen() {
         markers={markers}
         selectedDay={filter.kind === 'day' ? filter.date : dateKey(new Date())}
         user={user!}
-        status={lobby.status}
-        synced={lobby.status === 'online'}
         peers={lobby.peers}
         syncing={index.syncing}
-        onRetry={lobby.retry}
         onFilter={changeFilter}
         onSelectDay={(date) => {
           changeFilter({ kind: 'day', date })
@@ -420,12 +416,9 @@ export function WorkspaceScreen() {
         onSelect={selectNote}
         onNew={() => setTemplateOpen(true)}
         onCapture={capture}
-        onDeleteForever={deleteForever}
+        onDeleteForever={requestDelete}
         onOpenDrawer={() => setDrawerOpen(true)}
-        status={status}
-        synced={synced}
         syncing={index.syncing}
-        onRetry={retry}
         trashView={filter.kind === 'view' && filter.id === 'trash'}
       />
 
@@ -443,7 +436,7 @@ export function WorkspaceScreen() {
             members={members}
             onSummaryChange={index.updateSummary}
             onShare={() => setShareOpen(true)}
-            onDeleteForever={() => deleteForever(selected.id)}
+            onDeleteForever={() => requestDelete(selected.id)}
             onDuplicate={duplicateSelected}
             onBack={() => setSelectedId(null)}
             onToast={showToast}
@@ -517,6 +510,19 @@ export function WorkspaceScreen() {
           onLeave={leaveNote}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Delete forever?"
+        body={
+          pendingDelete
+            ? `“${effectiveTitle(pendingDelete)}” will be removed for everyone it is shared with. This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete forever"
+        onConfirm={confirmDelete}
+        onClose={() => setPendingDelete(null)}
+      />
 
       <SettingsDialog
         open={settingsOpen}

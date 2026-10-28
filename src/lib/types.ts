@@ -37,7 +37,7 @@ export interface Member {
   role: Role
 }
 
-export type ViewId = 'today' | 'all' | 'starred' | 'reminders' | 'trash'
+export type ViewId = 'today' | 'all' | 'starred' | 'trash'
 
 export type Filter =
   | { kind: 'view'; id: ViewId }
