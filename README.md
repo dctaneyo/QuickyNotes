@@ -93,9 +93,10 @@ The first account you create is the admin. Local data lives in `./data` (git-ign
 
 ## Deploy to Railway
 
-1. Push this repository to GitHub and create a Railway project from it. `railway.toml` already sets
-   the build command (`npm ci --include=dev && npm run build`), the start command
-   (`node server/index.js`) and the health check (`/healthz`).
+1. Push this repository to GitHub and create a Railway project from it. `railway.toml` sets the
+   build command (`npm run build`), the start command (`node server/index.js`) and the health check
+   (`/healthz`). Nixpacks installs dependencies in its own install phase; do not add `npm ci` to
+   the build command, because it collides with Nixpacks’ cached `node_modules/.cache`.
 2. **Add a volume** to the service and mount it at `/data`. Without a volume, SQLite is lost on
    every redeploy.
 3. Set the service variable `DATA_DIR=/data`. `PORT` is injected by Railway and the server listens

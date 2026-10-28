@@ -4,7 +4,9 @@
 
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm ci --include=dev && npm run build"
+# Nixpacks installs all dependencies (including dev deps) before this phase.
+# A second npm ci here collides with its cached node_modules/.cache and fails EBUSY.
+buildCommand = "npm run build"
 
 [deploy]
 startCommand = "node server/index.js"
