@@ -26,7 +26,7 @@ WebSocket sync server and the built client — so it deploys as a single Railway
   code and dividers.
 - Slash menu (`/`) for block types, markdown shortcuts (`# `, `- `, `[] `, `> `, ` ``` `), Tab to
   indent, Alt+↑/↓ to move a block, drag handle to reorder, undo/redo with `⌘Z`.
-- Tags, due dates, repeat cadence, star, trash and restore.
+- Tags, due dates, star, trash and restore.
 - Views: Today, a month calendar that filters by day, All notes, Starred, Reminders (due or
   overdue), tags, and Trash.
 - Search across titles, body text and tags — works from the local cache while offline.

@@ -2,13 +2,10 @@ import * as Y from 'yjs'
 import type { BlockType } from '../lib/types'
 import { uid } from '../lib/notes'
 
-export type Repeat = 'none' | 'daily' | 'weekly' | 'monthly'
-
 export interface NoteMetaValues {
   title: string
   tags: string[]
   due: string | null
-  repeat: Repeat
   starred: boolean
   trashed: boolean
   createdAt: number
@@ -52,9 +49,6 @@ export function noteMeta(doc: Y.Doc): NoteMetaValues {
     title: typeof meta.get('title') === 'string' ? (meta.get('title') as string) : '',
     tags: Array.isArray(rawTags) ? rawTags.filter((tag): tag is string => typeof tag === 'string') : [],
     due: typeof meta.get('due') === 'string' && meta.get('due') ? (meta.get('due') as string) : null,
-    repeat: (['daily', 'weekly', 'monthly'].includes(String(meta.get('repeat')))
-      ? String(meta.get('repeat'))
-      : 'none') as Repeat,
     starred: meta.get('starred') === true,
     trashed: meta.get('trashed') === true,
     createdAt: Number(meta.get('createdAt')) || Date.now(),
@@ -174,7 +168,6 @@ export function seedDocument(
     title: string
     tags: string[]
     due: string | null
-    repeat?: Repeat
     blocks: BlockSeed[]
   },
 ): void {
@@ -184,7 +177,6 @@ export function seedDocument(
     meta.set('title', values.title)
     meta.set('tags', values.tags)
     meta.set('due', values.due)
-    meta.set('repeat', values.repeat ?? 'none')
     meta.set('starred', false)
     meta.set('trashed', false)
     meta.set('createdAt', now)

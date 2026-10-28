@@ -2,15 +2,12 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import type { Member, NoteSummary, SyncState } from '../lib/types'
 import {
-  dateKey,
   dayLabel,
-  formatDue,
   formatTime,
   initials,
   isOverdue,
   normalizeTag,
   noteDay,
-  todayKey,
 } from '../lib/notes'
 import {
   blockArray,
@@ -23,7 +20,6 @@ import {
   noteMeta,
   patchMeta,
   plainText,
-  type Repeat,
 } from '../sync/noteModel'
 import type { Peer } from '../sync/useNoteSync'
 import { BlockRow, type BlockRowApi, type FocusRequest, type SlashState } from './BlockRow'
@@ -47,25 +43,9 @@ interface NoteEditorProps {
   onShare: () => void
   onDeleteForever: () => void
   onDuplicate: () => void
-  onCreateNext: (due: string) => void
   onBack: () => void
   onToast: (message: string) => void
   autoFocus?: boolean
-}
-
-const REPEAT_LABELS: Record<Repeat, string> = {
-  none: 'Does not repeat',
-  daily: 'Every day',
-  weekly: 'Every week',
-  monthly: 'Every month',
-}
-
-function nextDueDate(due: string, repeat: Repeat): string {
-  const date = new Date(`${due}T12:00:00`)
-  if (repeat === 'daily') date.setDate(date.getDate() + 1)
-  if (repeat === 'weekly') date.setDate(date.getDate() + 7)
-  if (repeat === 'monthly') date.setMonth(date.getMonth() + 1)
-  return dateKey(date)
 }
 
 export function NoteEditor({
@@ -81,7 +61,6 @@ export function NoteEditor({
   onShare,
   onDeleteForever,
   onDuplicate,
-  onCreateNext,
   onBack,
   onToast,
   autoFocus = false,
@@ -265,10 +244,6 @@ export function NoteEditor({
     patchMeta(doc, { due: value || null })
   }
 
-  const setRepeat = (value: Repeat) => {
-    patchMeta(doc, { repeat: value })
-  }
-
   const onUndoKeys = (event: React.KeyboardEvent) => {
     if (!(event.metaKey || event.ctrlKey)) return
     const key = event.key.toLowerCase()
@@ -281,7 +256,6 @@ export function NoteEditor({
   }
 
   const wordCount = plain.split(/\s+/).filter(Boolean).length
-  const dueSoon = meta.repeat !== 'none' && !!meta.due && meta.due <= todayKey()
   const collaboratorCount = members?.length ?? summary.memberCount
 
   const trash = () => {
@@ -429,20 +403,6 @@ export function NoteEditor({
         </div>
       ) : null}
 
-      {dueSoon ? (
-        <div className="banner banner--repeat">
-          This note repeats {REPEAT_LABELS[meta.repeat].toLowerCase()} and was due{' '}
-          {formatDue(meta.due ?? '')}.
-          <button
-            type="button"
-            className="link"
-            onClick={() => onCreateNext(nextDueDate(meta.due as string, meta.repeat))}
-          >
-            Start the next one
-          </button>
-        </div>
-      ) : null}
-
       <div className="note__scroll" onKeyDownCapture={onUndoKeys}>
         <div className="note__title-wrap">
           <input
@@ -509,18 +469,6 @@ export function NoteEditor({
                   Clear
                 </button>
               ) : null}
-              <select
-                className="repeat-field"
-                value={meta.repeat}
-                onChange={(event) => setRepeat(event.target.value as Repeat)}
-                aria-label="Repeat"
-              >
-                {(Object.keys(REPEAT_LABELS) as Repeat[]).map((value) => (
-                  <option key={value} value={value}>
-                    {REPEAT_LABELS[value]}
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
         </div>

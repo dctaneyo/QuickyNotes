@@ -307,7 +307,6 @@ export function WorkspaceScreen() {
         title,
         tags: meta.tags,
         due,
-        repeat: meta.repeat,
         blocks,
       }),
     )
@@ -331,50 +330,6 @@ export function WorkspaceScreen() {
     })
     setSelectedId(id)
     showToast('Note duplicated')
-  }
-
-  const createNextOccurrence = (due: string) => {
-    if (!selected || !sync.doc || !user) return
-    const source = sync.doc
-    const meta = noteMeta(source)
-    const blocks = blockViews(source).map((block) => ({
-      type: block.type,
-      text: block.text,
-      checked: false,
-      indent: block.indent,
-    }))
-    const id = uid()
-    putSeed(
-      id,
-      encodeSeed({
-        ownerId: user.userId,
-        title: meta.title || effectiveTitle(selected),
-        tags: meta.tags,
-        due,
-        repeat: meta.repeat,
-        blocks,
-      }),
-    )
-    autoFocusRef.current = id
-    const now = Date.now()
-    void index.registerNote({
-      id,
-      title: meta.title || effectiveTitle(selected),
-      due,
-      tags: meta.tags,
-      starred: false,
-      trashed: false,
-      createdAt: now,
-      updatedAt: now,
-      ownerId: user.userId,
-      ownerName: user.displayName,
-      role: 'owner',
-      memberCount: 1,
-      text: blocks.map((block) => block.text).join('\n'),
-      pending: true,
-    })
-    setSelectedId(id)
-    showToast('Next occurrence started')
   }
 
   const deleteForever = (id: string) => {
@@ -490,7 +445,6 @@ export function WorkspaceScreen() {
             onShare={() => setShareOpen(true)}
             onDeleteForever={() => deleteForever(selected.id)}
             onDuplicate={duplicateSelected}
-            onCreateNext={createNextOccurrence}
             onBack={() => setSelectedId(null)}
             onToast={showToast}
             autoFocus={autoFocusRef.current === selected.id}

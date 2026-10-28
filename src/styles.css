@@ -1151,17 +1151,6 @@ p {
   color: var(--muted);
 }
 
-.repeat-field {
-  height: 28px;
-  border-radius: 7px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  font-size: 11px;
-  color: var(--ink-soft);
-  padding: 0 6px;
-  max-width: 140px;
-}
-
 .note__body {
   margin-top: 26px;
 }
@@ -1431,11 +1420,6 @@ p {
 .banner--trash {
   background: var(--danger-soft);
   color: #8a2f22;
-}
-
-.banner--repeat {
-  background: #eef3ff;
-  color: #24448f;
 }
 
 .menu-wrap {
