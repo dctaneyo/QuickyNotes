@@ -16,14 +16,19 @@ WebSocket sync server and the built client — so it deploys as a single Railway
   reassign an ID later.
 - PINs are stored as `scrypt` hashes. Five wrong tries lock the account for five minutes, plus a
   per-IP throttle. Sessions are random tokens (stored hashed) and last 30 days per device.
-- The first account created becomes the admin. Settings includes account management: change an
-  ID, reset a PIN, rename yourself.
+- The first account created becomes the admin. Admins get a separate **Admin console** from the
+  sidebar for accounts: search people, reassign an ID, reset a PIN. Everyone's Settings stays
+  personal — your name, your ID and your PIN.
 - No email recovery by design — an admin resets a forgotten PIN.
 
 **Notes**
 
 - Block editor: text, three heading levels, bulleted and numbered lists, to-dos, quotes, callouts,
   code and dividers.
+- **Format rail**: a single horizontal strip with block type, bold, italic, underline, strike,
+  custom font size, text colour, highlight, indentation and reset. It docks above the keyboard on
+  touch devices, becomes a floating popover on desktop, and scrolls sideways when space is tight.
+  Formatting is stored on the block, so it survives collaboration, duplication and templates.
 - Slash menu (`/`) for block types, markdown shortcuts (`# `, `- `, `[] `, `> `, ` ``` `), Tab to
   indent, Alt+↑/↓ to move a block, drag handle to reorder, undo/redo with `⌘Z`.
 - Every note belongs to a day. New notes start on today, and **Move** re-files one to another
@@ -34,7 +39,10 @@ WebSocket sync server and the built client — so it deploys as a single Railway
 - **Tidy blank lines** in the note menu removes empty text blocks in one undoable step; empty
   to-dos, headings and dividers are left alone.
 - Templates and a daily note (`Blank`, `Daily`, `Meeting`, `Project`), plus quick capture from the
-  list.
+  list. Your own templates open as a page in the note pane with a template ribbon and autosave, so
+  you edit the layout exactly as it will look.
+- **Lock a note** as its owner to make it read-only. Shared people can unlock with an optional note
+  password, and an unlock lasts only until they leave the note.
 
 **Collaboration**
 
@@ -42,8 +50,13 @@ WebSocket sync server and the built client — so it deploys as a single Railway
   leave. Notes are private unless shared.
 - Text sync is a Yjs CRDT over a WebSocket per note, so two people can type in the same block
   without overwriting each other.
-- Presence: avatars in the note header and a coloured marker on the block someone is editing.
+- Presence: avatars in the note header and a coloured marker on the block someone is editing,
+  with the person's name on a slightly translucent tag so text underneath stays readable.
 - A live connection badge (Synced / Reconnecting / Offline) in the note header.
+- **Note activity**: a clock button in the note header opens an inline timeline of who changed
+  what and when. Selecting an entry shows the note at that point, with added text highlighted and
+  removed text struck through. Edits are batched per person and every update arrives over the
+  existing event WebSocket; there is no polling.
 
 **Offline**
 
@@ -102,6 +115,7 @@ server/
   auth.js       scrypt PINs, sessions, lockout, admin helpers
   db.js         node:sqlite schema and migrations
   realtime.js   Yjs rooms, awareness, debounced persistence
+  history.js    batched, attributed note revisions and snapshots
 src/
   auth/         session context
   screens/      numpad sign-in / create account
@@ -125,8 +139,11 @@ src/
 ## Known limits / next steps
 
 - Table/database blocks (Notion-style properties and views) are **not** implemented yet.
-- Inline bold/italic is not exposed; formatting is block-level. Paste is plain text.
-- Presence is per block, not a character-level remote caret.
-- Attachments, comments and version history are not built.
+- Formatting applies to the active block, not a text selection; selection-level rich text is not
+  exposed. Paste is plain text.
+- Presence shows each collaborator’s block caret and name tag; text selections are not highlighted.
+- Activity history begins with this build; edits made before it was running are not retroactively
+  available. It versions the title and block content/formatting, not tags, stars or day moves.
+- Attachments and comments are not built.
 - A 6-digit PIN is only 1,000,000 combinations: lockout, throttling and HTTPS are what make it
   acceptable. Add a second factor before exposing this publicly at scale.

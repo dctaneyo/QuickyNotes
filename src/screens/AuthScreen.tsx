@@ -76,6 +76,11 @@ export function AuthScreen() {
 
   const finishSignup = useCallback(async () => {
     if (confirmPin.length !== PIN_LENGTH || busy) return
+    if (!displayName.trim()) {
+      setError('Add a display name to continue.')
+      setStep('signup-pin')
+      return
+    }
     if (confirmPin !== firstPin) {
       setError('Those PINs do not match. Try again.')
       setConfirmPin('')
@@ -141,6 +146,10 @@ export function AuthScreen() {
     }
     if (step === 'signup-pin') {
       if (pin.length === PIN_LENGTH) {
+        if (!displayName.trim()) {
+          setError('Add a display name to continue.')
+          return
+        }
         setFirstPin(pin)
         setStep('signup-confirm')
       }
@@ -303,12 +312,14 @@ export function AuthScreen() {
                     minutes.
                   </p>
                   <label className="field field--name">
-                    <span>Your name (optional)</span>
+                    <span>Your name</span>
                     <input
                       type="text"
                       value={displayName}
                       maxLength={40}
                       placeholder="Dana"
+                      required
+                      aria-required="true"
                       onChange={(event) => setDisplayName(event.target.value)}
                       autoComplete="nickname"
                     />

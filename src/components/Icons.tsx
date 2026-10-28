@@ -127,12 +127,57 @@ export function ShareIcon(props: IconProps) {
   )
 }
 
+export function HistoryIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3.8 12a8.2 8.2 0 1 0 2.4-5.8L3.8 8.6" />
+      <path d="M3.8 4.4v4.2h4.2M12 7.6V12l3 1.8" />
+    </Svg>
+  )
+}
+
+export function LockIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="5" y="10.4" width="14" height="9.6" rx="2" />
+      <path d="M8.5 10.4V7.7a3.5 3.5 0 0 1 7 0v2.7M12 14.4v2.2" />
+    </Svg>
+  )
+}
+
 export function DotsIcon(props: IconProps) {
   return (
     <Svg {...props}>
       <circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
       <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
       <circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    </Svg>
+  )
+}
+
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6 9l6 6 6-6" />
+    </Svg>
+  )
+}
+
+export function HighlighterIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M8.2 14.2l-2.3 2.3-1.8 3.9 3.9-1.8 2.3-2.3" />
+      <path d="M9.4 13l5.8-5.8 3.6 3.6-5.8 5.8z" />
+      <path d="M14.2 4.4l1.5-1.5 3.6 3.6-1.5 1.5" />
+    </Svg>
+  )
+}
+
+export function ResetFormatIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4.8 15.5l6.9-9.4a2 2 0 0 1 2.8-.3l2.6 1.9a2 2 0 0 1 .3 2.8l-6.9 9.4" />
+      <path d="M4.8 15.5l3.2 2.4 2.7-3.6M10 19.2h9.2" />
     </Svg>
   )
 }

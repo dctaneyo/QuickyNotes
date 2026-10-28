@@ -9,7 +9,7 @@ import {
   groupByDay,
   noteSnippet,
 } from '../lib/notes'
-import { SearchIcon, StarIcon, XIcon } from '../components/Icons'
+import { LockIcon, SearchIcon, StarIcon, TrashIcon, XIcon } from '../components/Icons'
 
 interface NoteListProps {
   title: string
@@ -22,9 +22,11 @@ interface NoteListProps {
   onNew: () => void
   onCapture: (text: string) => void
   onDeleteForever: (id: string) => void
+  onEmptyTrash: () => void
   onOpenDrawer: () => void
   syncing: boolean
   trashView: boolean
+  trashCount: number
 }
 
 export function NoteList({
@@ -38,9 +40,11 @@ export function NoteList({
   onNew,
   onCapture,
   onDeleteForever,
+  onEmptyTrash,
   onOpenDrawer,
   syncing,
   trashView,
+  trashCount,
 }: NoteListProps) {
   const [draft, setDraft] = useState('')
   const groups = groupByDay(notes)
@@ -77,11 +81,23 @@ export function NoteList({
           <span className="list__count mono">{notes.length}</span>
         </div>
         <div className="list__head-actions">
-          <button type="button" className="btn btn--icon" onClick={onNew} aria-label="New note">
-            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </button>
+          {trashView ? (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm list__trash-btn"
+              onClick={onEmptyTrash}
+              disabled={trashCount === 0}
+              aria-label={`Empty trash (${trashCount} ${trashCount === 1 ? 'note' : 'notes'})`}
+            >
+              Empty trash
+            </button>
+          ) : (
+            <button type="button" className="btn btn--icon" onClick={onNew} aria-label="New note">
+              <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
         </div>
       </header>
 
@@ -135,6 +151,12 @@ export function NoteList({
         </form>
       ) : null}
 
+      {trashView ? (
+        <p className="list__retention">
+          Notes are deleted automatically 10 days after they are trashed.
+        </p>
+      ) : null}
+
       <div className="list__scroll">
         {groups.length === 0 ? (
           <div className="empty">
@@ -146,15 +168,14 @@ export function NoteList({
             ) : trashView ? (
               <>
                 <p className="empty__title">Trash is empty</p>
-                <p className="empty__body">Deleted notes wait here until you clear them out.</p>
+                <p className="empty__body">
+                  Notes stay here for 10 days, then are deleted automatically.
+                </p>
               </>
             ) : (
               <>
                 <p className="empty__title">Nothing here yet</p>
-                <p className="empty__body">Start a note above, or press the + button.</p>
-                <button type="button" className="btn btn--ghost btn--sm" onClick={onNew}>
-                  Start a note
-                </button>
+                <p className="empty__body">Press the + button to start a note.</p>
               </>
             )}
           </div>
@@ -191,20 +212,24 @@ export function NoteList({
                       </span>
                     ))}
                     {note.memberCount > 1 ? <span className="row__badge">Shared</span> : null}
+                    {note.locked ? (
+                      <span className="row__lock" title="Locked" aria-label="Locked">
+                        <LockIcon size={12} />
+                      </span>
+                    ) : null}
                     {note.pending ? <span className="row__badge row__badge--pending">Local only</span> : null}
                   </span>
                 </button>
                 {trashView ? (
                   <div className="row__actions">
-                    <button type="button" className="link" onClick={() => onSelect(note.id)}>
-                      Open
-                    </button>
                     <button
                       type="button"
-                      className="link link--danger"
+                      className="icon-btn icon-btn--tiny icon-btn--danger"
                       onClick={() => onDeleteForever(note.id)}
+                      aria-label={`Permanently delete ${effectiveTitle(note)}`}
+                      title="Permanently delete"
                     >
-                      Delete
+                      <TrashIcon size={16} />
                     </button>
                   </div>
                 ) : null}

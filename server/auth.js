@@ -87,7 +87,7 @@ export function userForToken(token) {
     .prepare(
       `SELECT u.*, s.token_hash FROM sessions s
        JOIN users u ON u.user_id = s.user_id
-       WHERE s.token_hash = ? AND s.expires_at > ?`,
+       WHERE s.token_hash = ? AND s.expires_at > ? AND u.suspended_at = 0`,
     )
     .get(hashToken(token), Date.now())
   if (!row) return null

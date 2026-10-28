@@ -1,0 +1,20 @@
+/** Tags offered in the editor before anyone has made their own. */
+export const SUGGESTED_TAGS = [
+  'work',
+  'personal',
+  'idea',
+  'todo',
+  'meeting',
+  'project',
+  'important',
+  'follow-up',
+  'reading',
+  'health',
+  'finance',
+  'home',
+  'errand',
+  'travel',
+  'later',
+  'recipe',
+  'question',
+]

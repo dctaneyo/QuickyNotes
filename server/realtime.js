@@ -4,6 +4,8 @@ import * as awarenessProtocol from 'y-protocols/awareness'
 import * as encoding from 'lib0/encoding'
 import * as decoding from 'lib0/decoding'
 import { db } from './db.js'
+import { pushNotesForNote } from './events.js'
+import { noteSnapshot, recordNoteHistory } from './history.js'
 
 const MESSAGE_SYNC = 0
 const MESSAGE_AWARENESS = 1
@@ -12,6 +14,20 @@ const ROOM_IDLE_MS = 5_000
 
 /** @type {Map<string, Room>} */
 const rooms = new Map()
+let activityHandler = () => {}
+
+/** Let the HTTP layer mirror live-room counts into the admin snapshot. */
+export function onRoomActivity(handler) {
+  activityHandler = handler
+}
+
+function notifyActivity() {
+  try {
+    activityHandler()
+  } catch {
+    // Activity telemetry must never break sync.
+  }
+}
 
 function loadPersistedState(room) {
   if (!room.startsWith('note:')) return null
@@ -33,6 +49,14 @@ function saveRoom(entry) {
     const update = Y.encodeStateAsUpdate(entry.doc)
     const meta = entry.doc.getMap('meta').toJSON()
     const updatedAt = Number(meta.updatedAt) || Date.now()
+    const trashed = meta.trashed ? 1 : 0
+    const existing = db.prepare('SELECT trashed, trashed_at FROM notes WHERE id = ?').get(noteId)
+    // Keep the original trash date if the note is edited while in the trash.
+    const trashedAt = trashed
+      ? existing?.trashed === 1 && existing.trashed_at > 0
+        ? existing.trashed_at
+        : Date.now()
+      : 0
     // Plain text is mirrored into SQLite so search works on cold notes without
     // loading every Yjs document.
     const text = entry.doc
@@ -44,19 +68,22 @@ function saveRoom(entry) {
       })
       .join('\n')
     db.prepare(
-      `UPDATE notes SET content = ?, title = ?, due = ?, starred = ?, trashed = ?, updated_at = ?, text = ?, tags = ?
+      `UPDATE notes SET content = ?, title = ?, due = ?, starred = ?, trashed = ?, trashed_at = ?, updated_at = ?, text = ?, tags = ?
        WHERE id = ?`,
     ).run(
       Buffer.from(update),
       typeof meta.title === 'string' ? meta.title : '',
       typeof meta.due === 'string' && meta.due ? meta.due : null,
       meta.starred ? 1 : 0,
-      meta.trashed ? 1 : 0,
+      trashed,
+      trashedAt,
       updatedAt,
       text.slice(0, 20_000),
       JSON.stringify(Array.isArray(meta.tags) ? meta.tags.slice(0, 20) : []),
       noteId,
     )
+    // Title, tags, date, star and trash state all live in the note list.
+    pushNotesForNote(noteId)
   } catch (error) {
     console.error('[sync] could not persist note', noteId, error.message)
   }
@@ -74,7 +101,7 @@ function getRoom(room) {
   awareness.setLocalState(null) // the server itself has no cursor
 
   /** @type {Room} */
-  const entry = { room, doc, awareness, conns: new Set(), saveTimer: null }
+  const entry = { room, doc, awareness, conns: new Set(), saveTimer: null, snapshot: noteSnapshot(doc) }
   rooms.set(room, entry)
 
   doc.on('update', (update, origin) => {
@@ -86,6 +113,16 @@ function getRoom(room) {
       if (conn !== origin && conn.readyState === 1) conn.send(message)
     }
     scheduleSave(entry)
+
+    // Attribute this update to the connection that sent it. The snapshot from
+    // just before the update gives an exact before/after for the activity log.
+    if (entry.room.startsWith('note:')) {
+      const after = noteSnapshot(entry.doc)
+      if (origin && origin.user?.userId) {
+        recordNoteHistory(entry.room.slice(5), origin.user, entry.snapshot, after)
+      }
+      entry.snapshot = after
+    }
   })
 
   awareness.on('update', ({ added, updated, removed }, origin) => {
@@ -123,6 +160,7 @@ export function attachConnection(conn, room) {
   const entry = getRoom(room)
   entry.conns.add(conn)
   conn.awarenessIds = new Set()
+  notifyActivity()
 
   // 1. Hand the client the current document state.
   {
@@ -170,6 +208,7 @@ export function attachConnection(conn, room) {
 
   conn.on('close', () => {
     entry.conns.delete(conn)
+    notifyActivity()
     if (conn.awarenessIds.size > 0) {
       awarenessProtocol.removeAwarenessStates(
         entry.awareness,
@@ -187,11 +226,24 @@ export function attachConnection(conn, room) {
         live.awareness.destroy()
         live.doc.destroy()
         rooms.delete(room)
+        notifyActivity()
       }, ROOM_IDLE_MS).unref()
     }
   })
 
   conn.on('error', () => {})
+}
+
+export function roomStats() {
+  let connections = 0
+  let noteRooms = 0
+  let lobbyConnections = 0
+  for (const entry of rooms.values()) {
+    connections += entry.conns.size
+    if (entry.room.startsWith('note:')) noteRooms += 1
+    else lobbyConnections += entry.conns.size
+  }
+  return { rooms: rooms.size, noteRooms, connections, lobbyConnections }
 }
 
 export function closeAllRooms() {

@@ -14,16 +14,20 @@ import type { Filter, Member, NoteSummary, ViewId } from '../lib/types'
 import { encodeSeed, blockViews, noteMeta } from '../sync/noteModel'
 import { useNoteSync } from '../sync/useNoteSync'
 import { useLobby } from '../sync/useLobby'
+import { useEvents } from '../sync/useEvents'
 import { putSeed } from '../sync/seeds'
 import { useNoteIndex } from '../hooks/useNoteIndex'
-import { templateById } from '../lib/templates'
+import type { CustomTemplate, NoteTemplate, TemplateDraft } from '../lib/templates'
 import { Sidebar } from './Sidebar'
 import { NoteList } from './NoteList'
 import { NoteEditor } from './NoteEditor'
 import { TemplateSheet } from './TemplateSheet'
+import { TemplateNoteEditor } from './TemplateNoteEditor'
 import { ShareDialog } from './ShareDialog'
 import { SettingsDialog } from './SettingsDialog'
+import { AdminConsole } from './AdminConsole'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { ConnectionBadge } from '../components/ConnectionBadge'
 
 const VIEW_TITLES: Record<ViewId, string> = {
   today: 'Today',
@@ -38,7 +42,8 @@ function isMobileViewport(): boolean {
 
 export function WorkspaceScreen() {
   const { user, token, signOut, setName, changePin } = useAuth()
-  const index = useNoteIndex(token, user?.userId ?? null)
+  const events = useEvents(token)
+  const index = useNoteIndex(token, user?.userId ?? null, events)
   const lobby = useLobby(token, user?.userId ?? null, user?.displayName ?? null)
 
   const [filter, setFilter] = useState<Filter>({ kind: 'view', id: 'today' })
@@ -46,12 +51,12 @@ export function WorkspaceScreen() {
   const [search, setSearch] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [templateOpen, setTemplateOpen] = useState(false)
+  const [templateEditing, setTemplateEditing] = useState<CustomTemplate | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [members, setMembers] = useState<Member[] | null>(null)
+  const [adminOpen, setAdminOpen] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<NoteSummary | null>(null)
-  const [membersLoading, setMembersLoading] = useState(false)
-  const [membersError, setMembersError] = useState<string | null>(null)
+  const [emptyTrashOpen, setEmptyTrashOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
   const searchRef = useRef<HTMLInputElement>(null)
@@ -60,6 +65,7 @@ export function WorkspaceScreen() {
 
   const notes = index.notes
   const selected = notes.find((note) => note.id === selectedId) ?? null
+  const members = selected?.members ?? null
   const sync = useNoteSync(
     selected?.id ?? null,
     token,
@@ -87,37 +93,14 @@ export function WorkspaceScreen() {
   }, [selectedId])
 
   useEffect(() => {
-    if (!selectedId) {
-      setMembers(null)
-      return
-    }
-    if (!token) return
-    let cancelled = false
-    setMembersLoading(true)
-    setMembersError(null)
-    api<{ members: Member[] }>(`/api/notes/${selectedId}`, { token })
-      .then((result) => {
-        if (!cancelled) setMembers(result.members)
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setMembers(null)
-          setMembersError(error instanceof Error ? error.message : 'Could not load people.')
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setMembersLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [selectedId, token, lobby.status])
-
-  useEffect(() => {
     if (selectedId && !notes.some((note) => note.id === selectedId) && !index.syncing) {
       setSelectedId(null)
     }
   }, [notes, selectedId, index.syncing])
+
+  useEffect(() => {
+    if (templateOpen) events.requestTemplates()
+  }, [templateOpen, events.requestTemplates])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -195,6 +178,7 @@ export function WorkspaceScreen() {
         : `#${filter.tag}`
 
   const selectNote = (id: string) => {
+    setTemplateEditing(null)
     setSelectedId(id)
     setDrawerOpen(false)
   }
@@ -211,9 +195,8 @@ export function WorkspaceScreen() {
     setDrawerOpen(false)
   }
 
-  const createNote = (templateId: string) => {
+  const createNote = (template: NoteTemplate) => {
     if (!user) return
-    const template = templateById(templateId)
     const id = uid()
     const due = todayKey()
     const title = template.title ? template.title(new Date()) : ''
@@ -245,6 +228,7 @@ export function WorkspaceScreen() {
     })
     setSelectedId(id)
     setFilter({ kind: 'view', id: 'today' })
+    setTemplateEditing(null)
     setTemplateOpen(false)
     setDrawerOpen(false)
     showToast(template.name === 'Blank note' ? 'New note' : `${template.name} created`)
@@ -252,6 +236,7 @@ export function WorkspaceScreen() {
 
   const capture = (text: string) => {
     if (!user) return
+    setTemplateEditing(null)
     const id = uid()
     const now = Date.now()
     putSeed(
@@ -295,6 +280,7 @@ export function WorkspaceScreen() {
       text: block.text,
       checked: block.checked,
       indent: block.indent,
+      format: block.format,
     }))
     const id = uid()
     const due = todayKey()
@@ -331,6 +317,64 @@ export function WorkspaceScreen() {
     showToast('Note duplicated')
   }
 
+  const saveTemplate = async (draft: TemplateDraft) => {
+    if (!token) throw new Error('Sign in again to save templates.')
+    await api<{ template: CustomTemplate }>('/api/templates', {
+      method: 'POST',
+      token,
+      body: draft,
+    })
+  }
+
+  const updateTemplate = async (id: string, draft: TemplateDraft) => {
+    if (!token) throw new Error('Sign in again to update templates.')
+    await api(`/api/templates/${id}`, { method: 'PATCH', token, body: draft })
+  }
+
+  const deleteTemplate = async (id: string) => {
+    if (!token) throw new Error('Sign in again to delete templates.')
+    await api(`/api/templates/${id}`, { method: 'DELETE', token })
+  }
+
+  const lockNote = async (password: string | null) => {
+    if (!selected || !token) throw new Error('Sign in again to lock notes.')
+    const result = await api<{ locked: boolean; lockProtected: boolean }>(
+      `/api/notes/${selected.id}/lock`,
+      { method: 'POST', token, body: { password } },
+    )
+    index.updateSummary({
+      ...selected,
+      locked: result.locked,
+      lockProtected: result.lockProtected,
+    })
+  }
+
+  const unlockNote = async (password: string | null) => {
+    if (!selected || !token) throw new Error('Sign in again to unlock notes.')
+    await api(`/api/notes/${selected.id}/unlock`, {
+      method: 'POST',
+      token,
+      body: { password },
+    })
+  }
+
+  const removeNoteLock = async () => {
+    if (!selected || !token) throw new Error('Sign in again to change the lock.')
+    await api(`/api/notes/${selected.id}/lock`, { method: 'DELETE', token })
+    index.updateSummary({ ...selected, locked: false, lockProtected: false })
+  }
+
+  const emptyTrash = async () => {
+    try {
+      await index.emptyTrash()
+      if (selected?.trashed) setSelectedId(null)
+      setEmptyTrashOpen(false)
+      showToast('Trash emptied')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not empty the trash')
+    }
+  }
+
   const requestDelete = (id: string) => {
     const target = notes.find((note) => note.id === id)
     if (target) setPendingDelete(target)
@@ -338,10 +382,11 @@ export function WorkspaceScreen() {
 
   const confirmDelete = () => {
     if (!pendingDelete) return
-    void index.deleteForever(pendingDelete.id)
-    if (selectedId === pendingDelete.id) setSelectedId(null)
+    const target = pendingDelete
+    void index.deleteForever(target.id)
+    if (selectedId === target.id) setSelectedId(null)
     setPendingDelete(null)
-    showToast('Deleted forever')
+    showToast(target.role === 'owner' ? 'Permanently deleted' : 'Removed from your trash')
   }
 
   const invite = async (userId: string) => {
@@ -351,8 +396,11 @@ export function WorkspaceScreen() {
       token,
       body: { userId },
     })
-    setMembers(result.members)
-    index.updateSummary({ ...selected, memberCount: result.members.length })
+    index.updateSummary({
+      ...selected,
+      memberCount: result.members.length,
+      members: result.members,
+    })
     showToast('Invited to this note')
   }
 
@@ -362,8 +410,11 @@ export function WorkspaceScreen() {
       `/api/notes/${selected.id}/members/${userId}`,
       { method: 'DELETE', token },
     )
-    setMembers(result.members)
-    index.updateSummary({ ...selected, memberCount: result.members.length })
+    index.updateSummary({
+      ...selected,
+      memberCount: result.members.length,
+      members: result.members,
+    })
     showToast('Removed from this note')
   }
 
@@ -377,7 +428,11 @@ export function WorkspaceScreen() {
   }
 
   return (
-    <div className={`shell${selected ? ' is-editing' : ''}${drawerOpen ? ' is-drawer' : ''}`}>
+    <div
+      className={`shell${selected || templateEditing ? ' is-editing' : ''}${
+        drawerOpen ? ' is-drawer' : ''
+      }`}
+    >
       <Sidebar
         filter={filter}
         counts={counts}
@@ -393,6 +448,10 @@ export function WorkspaceScreen() {
         }}
         onNew={() => setTemplateOpen(true)}
         onSettings={openSettings}
+        onAdmin={() => {
+          setAdminOpen(true)
+          setDrawerOpen(false)
+        }}
         onSignOut={() => void signOut()}
         onClose={() => setDrawerOpen(false)}
       />
@@ -417,13 +476,22 @@ export function WorkspaceScreen() {
         onNew={() => setTemplateOpen(true)}
         onCapture={capture}
         onDeleteForever={requestDelete}
+        onEmptyTrash={() => setEmptyTrashOpen(true)}
         onOpenDrawer={() => setDrawerOpen(true)}
         syncing={index.syncing}
         trashView={filter.kind === 'view' && filter.id === 'trash'}
+        trashCount={counts.trash}
       />
 
       <div className="shell__note">
-        {selected && sync.doc ? (
+        {templateEditing ? (
+          <TemplateNoteEditor
+            key={templateEditing.id}
+            template={templateEditing}
+            onSave={updateTemplate}
+            onDone={() => setTemplateEditing(null)}
+          />
+        ) : selected && sync.doc ? (
           <NoteEditor
             key={selected.id}
             summary={selected}
@@ -431,19 +499,37 @@ export function WorkspaceScreen() {
             peers={sync.peers}
             status={sync.status}
             synced={sync.synced}
-            setFocus={sync.setFocus}
+            setCursor={sync.setCursor}
             retry={sync.retry}
             members={members}
+            token={token}
+            historyEvents={events}
+            tagSuggestions={tags.map((tag) => tag.name)}
             onSummaryChange={index.updateSummary}
+            onSaveTemplate={saveTemplate}
             onShare={() => setShareOpen(true)}
             onDeleteForever={() => requestDelete(selected.id)}
             onDuplicate={duplicateSelected}
             onBack={() => setSelectedId(null)}
             onToast={showToast}
-            autoFocus={autoFocusRef.current === selected.id}
+            onLock={lockNote}
+            onUnlock={unlockNote}
+            onRemoveLock={removeNoteLock}
+            autoFocus={
+              !selected.trashed && !selected.locked && autoFocusRef.current === selected.id
+            }
           />
         ) : (
           <div className="placeholder">
+            <div className="placeholder__bar">
+              <span className="eyebrow">Quicky Notes</span>
+              <ConnectionBadge
+                status={lobby.status}
+                synced={lobby.status === 'online'}
+                onRetry={lobby.retry}
+                compact
+              />
+            </div>
             <div className="placeholder__inner">
               <p className="eyebrow">Quicky Notes</p>
               <h2 className="placeholder__title">
@@ -454,24 +540,6 @@ export function WorkspaceScreen() {
                   ? 'Loading the latest version from this device and the server.'
                   : 'Write one line now and tidy it later. Notes live with you, sync with the people you invite, and keep working offline.'}
               </p>
-              {!selected ? (
-                <div className="placeholder__actions">
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    onClick={() => setTemplateOpen(true)}
-                  >
-                    Start a note
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    onClick={() => changeFilter({ kind: 'view', id: 'today' })}
-                  >
-                    Go to today
-                  </button>
-                </div>
-              ) : null}
               <div className="placeholder__keys">
                 <span>
                   <kbd>⌘</kbd>
@@ -494,17 +562,24 @@ export function WorkspaceScreen() {
         open={templateOpen}
         onClose={() => setTemplateOpen(false)}
         onPick={createNote}
+        onEdit={(template) => {
+          setTemplateOpen(false)
+          setTemplateEditing(template)
+        }}
+        customTemplates={events.templates}
+        onDelete={deleteTemplate}
       />
 
-      {selected ? (
+      {selected && !selected.trashed ? (
         <ShareDialog
           open={shareOpen}
           onClose={() => setShareOpen(false)}
           note={selected}
           members={members}
-          loading={membersLoading}
-          error={membersError}
+          loading={!!selected && !selected.members}
+          error={null}
           currentUserId={user?.userId ?? ''}
+          token={token}
           onInvite={invite}
           onRemove={removeMember}
           onLeave={leaveNote}
@@ -512,14 +587,25 @@ export function WorkspaceScreen() {
       ) : null}
 
       <ConfirmDialog
+        open={emptyTrashOpen}
+        title="Empty trash?"
+        body="Notes you own will be permanently deleted. Notes shared with you will be removed from your account. This cannot be undone."
+        confirmLabel="Empty trash"
+        onConfirm={() => void emptyTrash()}
+        onClose={() => setEmptyTrashOpen(false)}
+      />
+
+      <ConfirmDialog
         open={!!pendingDelete}
-        title="Delete forever?"
+        title="Permanently delete?"
         body={
           pendingDelete
-            ? `“${effectiveTitle(pendingDelete)}” will be removed for everyone it is shared with. This cannot be undone.`
+            ? pendingDelete.role === 'owner'
+              ? `“${effectiveTitle(pendingDelete)}” will be permanently deleted for everyone it is shared with. This cannot be undone.`
+              : `“${effectiveTitle(pendingDelete)}” will be removed from your trash. The owner’s copy stays. This cannot be undone.`
             : ''
         }
-        confirmLabel="Delete forever"
+        confirmLabel="Permanently delete"
         onConfirm={confirmDelete}
         onClose={() => setPendingDelete(null)}
       />
@@ -528,11 +614,20 @@ export function WorkspaceScreen() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         user={user!}
-        token={token}
         onSignOut={signOut}
         onRename={setName}
         onChangePin={changePin}
       />
+
+      {user?.isAdmin ? (
+        <AdminConsole
+          open={adminOpen}
+          token={token}
+          currentUserId={user.userId}
+          events={events}
+          onClose={() => setAdminOpen(false)}
+        />
+      ) : null}
 
       <div className={`toast${toast ? ' is-visible' : ''}`} role="status" aria-live="polite">
         {toast}

@@ -1,8 +1,9 @@
 import { useEffect, useReducer, useRef } from 'react'
 import type * as Y from 'yjs'
 import { blockArray, blockTextNode, blockView, applyTextEdit } from '../sync/noteModel'
+import { formatSignature, formatTextStyle } from '../lib/formatting'
 import type { BlockType } from '../lib/types'
-import type { Peer } from '../sync/useNoteSync'
+import { RemoteCarets } from './RemoteCaret'
 import { filterSlash } from './SlashMenu'
 
 export interface FocusRequest {
@@ -19,6 +20,13 @@ export interface SlashState {
   index: number
 }
 
+export interface RemoteCursor {
+  clientId: number
+  displayName: string
+  color: string
+  index: number
+}
+
 export interface BlockRowApi {
   insertAfter: (index: number, seed: { type: BlockType; text: string; indent: number }) => string
   remove: (index: number) => void
@@ -28,6 +36,7 @@ export interface BlockRowApi {
   setSlash: (state: SlashState | null) => void
   slash: SlashState | null
   onPickCommand: (type: BlockType) => void
+  openFormat: (blockId: string, anchor: HTMLElement) => void
   setDrag: (index: number | null) => void
   dragIndex: number | null
   dropIndex: number | null
@@ -41,10 +50,15 @@ interface BlockRowProps {
   index: number
   order: number | null
   focusRequest: FocusRequest | null
-  remotePeer: Peer | undefined
+  remoteCursors: RemoteCursor[]
   api: BlockRowApi
   onEdited: () => void
-  onFocusBlock: (blockId: string | null) => void
+  onFocusBlock: (blockId: string | null, cursorIndex?: number) => void
+  /** Called on every text edit so an open format menu can step aside. */
+  onTyping?: () => void
+  /** Suppresses hover auto-format while a format menu is already open. */
+  formatOpen?: boolean
+  readOnly?: boolean
 }
 
 const MARKDOWN_TRIGGERS: Record<string, BlockType> = {
@@ -103,10 +117,13 @@ export function BlockRow({
   index,
   order,
   focusRequest,
-  remotePeer,
+  remoteCursors,
   api,
   onEdited,
   onFocusBlock,
+  onTyping,
+  formatOpen = false,
+  readOnly = false,
 }: BlockRowProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const text = blockTextNode(block)
@@ -114,6 +131,49 @@ export function BlockRow({
   const apiRef = useRef(api)
   apiRef.current = api
   const [, refreshBlock] = useReducer((value: number) => value + 1, 0)
+
+  // Desktop hover intent: resting the pointer over the focused block reveals
+  // its format popover, while typing or moving keeps it out of the way.
+  const hoverTimer = useRef<number | null>(null)
+  const hoverOrigin = useRef<{ x: number; y: number } | null>(null)
+  const pointerInside = useRef(false)
+  const pointerDown = useRef(false)
+  const gripRef = useRef<HTMLButtonElement>(null)
+
+  const stopHoverTimer = () => {
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current)
+      hoverTimer.current = null
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current)
+    }
+  }, [])
+
+  const armFormatOnHover = (point: { x: number; y: number } | null) => {
+    if (point) hoverOrigin.current = point
+    if (readOnly || formatOpen || pointerDown.current) return
+    if (apiRef.current.dragIndex !== null) return
+    if (typeof window === 'undefined') return
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return
+    if (!window.matchMedia('(min-width: 1025px)').matches) return
+    if (document.activeElement !== textareaRef.current) return
+    if (apiRef.current.slash?.blockId === view.id) return
+    stopHoverTimer()
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = null
+      if (pointerDown.current) return
+      if (apiRef.current.dragIndex !== null) return
+      if (document.activeElement !== textareaRef.current) return
+      if (apiRef.current.slash?.blockId === view.id) return
+      const anchor = gripRef.current
+      if (!anchor) return
+      apiRef.current.openFormat(view.id, anchor)
+    }, 700)
+  }
 
   // Type, checkbox and indentation live on the map, so re-render on its changes
   // rather than waiting for an unrelated parent update.
@@ -129,7 +189,8 @@ export function BlockRow({
     if (!el) return
     const sync = () => {
       const next = text.toString()
-      if (el.value !== next) {
+      const changed = el.value !== next
+      if (changed) {
         const focused = document.activeElement === el
         const start = el.selectionStart
         const end = el.selectionEnd
@@ -140,10 +201,14 @@ export function BlockRow({
         }
       }
       autoGrow(el)
+      return changed
     }
-    sync()
-    text.observe(sync)
-    return () => text.unobserve(sync)
+    if (sync()) refreshBlock()
+    const observer = () => {
+      if (sync()) refreshBlock()
+    }
+    text.observe(observer)
+    return () => text.unobserve(observer)
   }, [text])
 
   useEffect(() => {
@@ -193,10 +258,14 @@ export function BlockRow({
   }
 
   const handleInput = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (readOnly) return
+    stopHoverTimer()
+    onTyping?.()
     const el = event.currentTarget
     applyTextEdit(text, el.value)
     autoGrow(el)
     maybeOpenSlash(el)
+    onFocusBlock(view.id, el.selectionEnd)
     onEdited()
   }
 
@@ -214,6 +283,7 @@ export function BlockRow({
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (readOnly) return
     const el = event.currentTarget
     const items = api.slash ? filterSlash(api.slash.query) : []
 
@@ -342,7 +412,9 @@ export function BlockRow({
   if (view.type === 'divider') {
     return (
       <div
-        className={`block block--divider${api.dropIndex === index ? ' is-drop' : ''}`}
+        className={`block block--divider${readOnly ? ' is-readonly' : ''}${
+          api.dropIndex === index ? ' is-drop' : ''
+        }`}
         data-block-id={view.id}
         onDragOver={(event) => {
           if (api.dragIndex === null) return
@@ -354,11 +426,15 @@ export function BlockRow({
           api.onDropAt(index)
         }}
       >
-        <div className="block__gutter">
-          <button type="button" className="gutter-btn" onClick={() => api.remove(index)} aria-label="Delete divider">
-            ×
-          </button>
-        </div>
+        {readOnly ? (
+          <div className="block__gutter" aria-hidden="true" />
+        ) : (
+          <div className="block__gutter">
+            <button type="button" className="gutter-btn" onClick={() => api.remove(index)} aria-label="Delete divider">
+              ×
+            </button>
+          </div>
+        )}
         <hr className="block__rule" />
       </div>
     )
@@ -367,17 +443,41 @@ export function BlockRow({
   return (
     <div
       className={`block block--${view.type}${view.checked ? ' is-checked' : ''}${
-        api.dropIndex === index ? ' is-drop' : ''
-      }${api.dragIndex === index ? ' is-dragging' : ''}${
-        remotePeer ? ' has-remote' : ''
+        readOnly ? ' is-readonly' : ''
+      }${api.dropIndex === index ? ' is-drop' : ''}${
+        api.dragIndex === index ? ' is-dragging' : ''
       }`}
-      style={
-        {
-          marginLeft: `${view.indent * 22}px`,
-          ...(remotePeer ? { ['--remote-color' as string]: remotePeer.color } : {}),
-        } as React.CSSProperties
-      }
+      style={{ marginLeft: `${view.indent * 22}px` }}
       data-block-id={view.id}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== 'mouse') return
+        pointerInside.current = true
+        armFormatOnHover({ x: event.clientX, y: event.clientY })
+      }}
+      onPointerDown={() => {
+        pointerDown.current = true
+        stopHoverTimer()
+      }}
+      onPointerUp={() => {
+        pointerDown.current = false
+        if (pointerInside.current) armFormatOnHover(hoverOrigin.current)
+      }}
+      onPointerCancel={() => {
+        pointerDown.current = false
+      }}
+      onPointerMove={(event) => {
+        if (event.pointerType !== 'mouse' || !pointerInside.current) return
+        const origin = hoverOrigin.current
+        if (!origin) return
+        if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 10) return
+        armFormatOnHover({ x: event.clientX, y: event.clientY })
+      }}
+      onPointerLeave={() => {
+        pointerInside.current = false
+        pointerDown.current = false
+        hoverOrigin.current = null
+        stopHoverTimer()
+      }}
       onDragOver={(event) => {
         if (api.dragIndex === null) return
         event.preventDefault()
@@ -388,40 +488,46 @@ export function BlockRow({
         api.onDropAt(index)
       }}
     >
-      <div className="block__gutter">
-        <button
-          type="button"
-          className="gutter-btn gutter-btn--add"
-          onClick={() => {
-            const id = api.insertAfter(index, { type: 'text', text: '', indent: view.indent })
-            api.requestFocus(id, 'start')
-          }}
-          aria-label="Add block below"
-          title="Add block below"
-        >
-          +
-        </button>
-        <button
-          type="button"
-          className="gutter-btn gutter-btn--grip"
-          draggable
-          onDragStart={() => api.setDrag(index)}
-          onDragEnd={() => api.setDrag(null)}
-          aria-label="Drag to reorder"
-          title="Drag to reorder"
-        >
-          ⠿
-        </button>
-        <button
-          type="button"
-          className="gutter-btn gutter-btn--delete"
-          onClick={() => api.remove(index)}
-          aria-label="Delete block"
-          title="Delete block"
-        >
-          ×
-        </button>
-      </div>
+      {readOnly ? (
+        <div className="block__gutter" aria-hidden="true" />
+      ) : (
+        <div className="block__gutter">
+          <button
+            type="button"
+            className="gutter-btn gutter-btn--add"
+            onClick={() => {
+              const id = api.insertAfter(index, { type: 'text', text: '', indent: view.indent })
+              api.requestFocus(id, 'start')
+            }}
+            aria-label="Add block below"
+            title="Add block below"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            ref={gripRef}
+            className="gutter-btn gutter-btn--grip"
+            draggable
+            onClick={(event) => api.openFormat(view.id, event.currentTarget)}
+            onDragStart={() => api.setDrag(index)}
+            onDragEnd={() => api.setDrag(null)}
+            aria-label="Block menu"
+            title="Click to format · drag to reorder"
+          >
+            ⠿
+          </button>
+          <button
+            type="button"
+            className="gutter-btn gutter-btn--delete"
+            onClick={() => api.remove(index)}
+            aria-label="Delete block"
+            title="Delete block"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {view.type === 'todo' ? (
         <button
@@ -429,6 +535,7 @@ export function BlockRow({
           role="checkbox"
           aria-checked={view.checked}
           className="todo__box"
+          disabled={readOnly}
           onClick={() => {
             block.set('checked', !view.checked)
             onEdited()
@@ -462,28 +569,43 @@ export function BlockRow({
         </span>
       ) : null}
 
-      {remotePeer ? (
-        <span className="block__remote" style={{ background: remotePeer.color }}>
-          {remotePeer.displayName}
-        </span>
-      ) : null}
+      <div className="block__editor">
+        <RemoteCarets
+          textareaRef={textareaRef}
+          text={view.text}
+          peers={remoteCursors}
+          metricsKey={`${view.type}:${formatSignature(view.format)}`}
+        />
 
-      <textarea
-        ref={textareaRef}
-        className={`block__input block__input--${view.type}`}
-        defaultValue={view.text}
-        placeholder={placeholderFor(view.type)}
-        rows={1}
-        spellCheck
-        onChange={handleInput}
-        onKeyDown={handleKeyDown}
-        onFocus={() => {
-          onFocusBlock(view.id)
-          if (api.slash && api.slash.blockId !== view.id) api.setSlash(null)
-        }}
-        onBlur={() => onFocusBlock(null)}
-        aria-label={view.type === 'text' ? 'Note text' : `${view.type} block`}
-      />
+        <textarea
+          ref={textareaRef}
+          className={`block__input block__input--${view.type}`}
+          style={formatTextStyle(view.format)}
+          defaultValue={view.text}
+          placeholder={readOnly ? undefined : placeholderFor(view.type)}
+          rows={1}
+          spellCheck
+          readOnly={readOnly}
+          aria-readonly={readOnly}
+          onChange={handleInput}
+          onKeyDown={handleKeyDown}
+          onFocus={(event) => {
+            onFocusBlock(view.id, event.currentTarget.selectionEnd)
+            if (api.slash && api.slash.blockId !== view.id) api.setSlash(null)
+            if (pointerInside.current) armFormatOnHover(hoverOrigin.current)
+          }}
+          onSelect={(event) => {
+            if (document.activeElement === event.currentTarget) {
+              onFocusBlock(view.id, event.currentTarget.selectionEnd)
+            }
+          }}
+          onBlur={() => {
+            stopHoverTimer()
+            onFocusBlock(null)
+          }}
+          aria-label={view.type === 'text' ? 'Note text' : `${view.type} block`}
+        />
+      </div>
     </div>
   )
 }

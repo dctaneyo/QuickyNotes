@@ -62,6 +62,7 @@ export function useLobby(
           displayName: shape.user.displayName || shape.user.userId,
           color: shape.user.color || colorFor(shape.user.userId),
           focus: null,
+          cursor: null,
         })
       }
       setPeers(next)

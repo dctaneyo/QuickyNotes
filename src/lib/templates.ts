@@ -1,9 +1,12 @@
+import type { BlockFormat } from './formatting'
 import type { BlockType } from './types'
 
 export interface TemplateBlock {
   type: BlockType
   text: string
   checked?: boolean
+  indent?: number
+  format?: BlockFormat
 }
 
 export interface NoteTemplate {
@@ -83,6 +86,40 @@ export const TEMPLATES: NoteTemplate[] = [
     ],
   },
 ]
+
+export interface CustomTemplate {
+  id: string
+  name: string
+  title: string
+  tags: string[]
+  blocks: TemplateBlock[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface TemplateDraft {
+  name: string
+  title: string
+  tags: string[]
+  blocks: TemplateBlock[]
+}
+
+export function customTemplateAsNoteTemplate(template: CustomTemplate): NoteTemplate {
+  const count = template.blocks.length
+  const tagLabel = template.tags
+    .slice(0, 3)
+    .map((tag) => `#${tag}`)
+    .join(' ')
+  return {
+    id: `custom:${template.id}`,
+    name: template.name,
+    blurb: tagLabel ? `${count} blocks · ${tagLabel}` : `${count} blocks · saved by you`,
+    glyph: '✦',
+    tags: template.tags,
+    title: () => template.title,
+    blocks: template.blocks,
+  }
+}
 
 export function templateById(id: string): NoteTemplate {
   return TEMPLATES.find((template) => template.id === id) ?? TEMPLATES[0]

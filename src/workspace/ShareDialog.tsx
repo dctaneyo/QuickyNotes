@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Modal } from '../components/Modal'
 import { TrashIcon } from '../components/Icons'
+import { api } from '../lib/api'
 import { colorFor, initials } from '../lib/notes'
 import type { Member, NoteSummary } from '../lib/types'
+
+interface UserResult {
+  userId: string
+  displayName: string
+}
 
 interface ShareDialogProps {
   open: boolean
@@ -12,6 +18,7 @@ interface ShareDialogProps {
   loading: boolean
   error: string | null
   currentUserId: string
+  token: string | null
   onInvite: (userId: string) => Promise<void>
   onRemove: (userId: string) => Promise<void>
   onLeave: () => Promise<void>
@@ -25,34 +32,82 @@ export function ShareDialog({
   loading,
   error,
   currentUserId,
+  token,
   onInvite,
   onRemove,
   onLeave,
 }: ShareDialogProps) {
-  const [inviteId, setInviteId] = useState('')
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<UserResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [active, setActive] = useState(-1)
   const [busy, setBusy] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
 
+  const isOwner = note.role === 'owner'
+  const trimmed = query.trim()
+
   useEffect(() => {
     if (!open) {
-      setInviteId('')
+      setQuery('')
+      setResults([])
+      setActive(-1)
+      setSearching(false)
       setLocalError(null)
       setBusy(false)
     }
   }, [open])
 
-  const isOwner = note.role === 'owner'
+  useEffect(() => {
+    if (!open || !isOwner || !token) return
+    if (trimmed.length < 2) {
+      setResults([])
+      setSearching(false)
+      return
+    }
+    const controller = new AbortController()
+    setSearching(true)
+    const timer = window.setTimeout(() => {
+      api<{ users: UserResult[] }>(`/api/users/search?q=${encodeURIComponent(trimmed)}`, {
+        token,
+        signal: controller.signal,
+      })
+        .then((result) => {
+          if (!controller.signal.aborted) setResults(result.users)
+        })
+        .catch((caught: unknown) => {
+          if ((caught as Error)?.name === 'AbortError') return
+          if (!controller.signal.aborted) setResults([])
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSearching(false)
+        })
+    }, 220)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [open, isOwner, token, trimmed])
 
-  const invite = async () => {
-    if (inviteId.trim().length !== 8 || busy) {
-      setLocalError('Enter the 8-digit ID of the person you want to invite.')
+  const memberIds = new Set((members ?? []).map((member) => member.userId))
+  const matches = results.filter(
+    (entry) => entry.userId !== currentUserId && !memberIds.has(entry.userId),
+  )
+
+  const invite = async (candidate: string) => {
+    if (busy) return
+    const userId = candidate.trim()
+    if (!/^\d{8}$/.test(userId)) {
+      setLocalError('Pick someone from the list, or type their 8-digit ID.')
       return
     }
     setBusy(true)
     setLocalError(null)
     try {
-      await onInvite(inviteId.trim())
-      setInviteId('')
+      await onInvite(userId)
+      setQuery('')
+      setResults([])
+      setActive(-1)
     } catch (caught) {
       setLocalError(caught instanceof Error ? caught.message : 'Could not invite that person.')
     } finally {
@@ -63,31 +118,102 @@ export function ShareDialog({
   return (
     <Modal open={open} title="Share this note" onClose={onClose} size="sm">
       <p className="modal__lede">
-        Everyone listed here can open and edit this note at the same time. Invite people with their
-        8-digit ID.
+        Everyone listed here can open and edit this note at the same time. Search by name or 8-digit
+        ID to invite someone — no need to remember the number.
       </p>
 
       {isOwner ? (
-        <div className="invite">
-          <input
-            className="input input--mono"
-            inputMode="numeric"
-            placeholder="8-digit ID"
-            value={inviteId}
-            maxLength={8}
-            aria-label="Collaborator user ID"
-            onChange={(event) => {
-              setInviteId(event.target.value.replace(/\D/g, '').slice(0, 8))
-              setLocalError(null)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void invite()
-            }}
-          />
-          <button type="button" className="btn btn--primary" onClick={invite} disabled={busy}>
-            {busy ? 'Inviting…' : 'Invite'}
-          </button>
-        </div>
+        <>
+          <div className="invite">
+            <input
+              className="input"
+              type="text"
+              placeholder="Name or 8-digit ID"
+              value={query}
+              maxLength={40}
+              autoComplete="off"
+              role="combobox"
+              aria-expanded={matches.length > 0}
+              aria-autocomplete="list"
+              aria-controls="share-results"
+              aria-label="Find someone by name or user ID"
+              onChange={(event) => {
+                setQuery(event.target.value)
+                setActive(-1)
+                setLocalError(null)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  if (matches.length > 0) {
+                    setActive((index) => Math.min(index + 1, matches.length - 1))
+                  }
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setActive((index) => Math.max(index - 1, -1))
+                  return
+                }
+                if (event.key === 'Escape') {
+                  setResults([])
+                  setActive(-1)
+                  return
+                }
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  void invite(active >= 0 && matches[active] ? matches[active].userId : trimmed)
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() =>
+                void invite(active >= 0 && matches[active] ? matches[active].userId : trimmed)
+              }
+              disabled={busy}
+            >
+              {busy ? 'Inviting…' : 'Invite'}
+            </button>
+          </div>
+
+          {searching ? <p className="muted search-status">Searching…</p> : null}
+          {matches.length > 0 ? (
+            <div className="share-results" id="share-results" role="listbox" aria-label="Matching people">
+              {matches.map((entry, index) => (
+                <button
+                  key={entry.userId}
+                  type="button"
+                  role="option"
+                  aria-selected={index === active}
+                  className={`share-result${index === active ? ' is-active' : ''}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActive(index)}
+                  onClick={() => void invite(entry.userId)}
+                >
+                  <span
+                    className="avatar avatar--xs"
+                    style={{ background: colorFor(entry.userId) }}
+                    aria-hidden="true"
+                  >
+                    {initials(entry.displayName)}
+                  </span>
+                  <span className="share-result__text">
+                    <span className="share-result__name">{entry.displayName}</span>
+                    <span className="share-result__id mono">{entry.userId}</span>
+                  </span>
+                  <span className="share-result__add">Invite</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {!searching && trimmed.length >= 2 && matches.length === 0 ? (
+            <p className="muted search-status">
+              No one matches “{trimmed}” yet. You can still invite an exact 8-digit ID.
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       {localError || error ? (

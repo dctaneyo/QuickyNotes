@@ -25,6 +25,7 @@ interface SidebarProps {
   onSelectDay: (date: string) => void
   onNew: () => void
   onSettings: () => void
+  onAdmin: () => void
   onSignOut: () => void
   onClose: () => void
 }
@@ -49,6 +50,7 @@ export function Sidebar({
   onSelectDay,
   onNew,
   onSettings,
+  onAdmin,
   onSignOut,
   onClose,
 }: SidebarProps) {
@@ -171,9 +173,16 @@ export function Sidebar({
           </span>
         </button>
 
-        <button type="button" className="link link--tiny sidebar__signout" onClick={onSignOut}>
-          Sign out
-        </button>
+        <div className="sidebar__foot-links">
+          {user.isAdmin ? (
+            <button type="button" className="link link--tiny" onClick={onAdmin}>
+              Admin console
+            </button>
+          ) : null}
+          <button type="button" className="link link--tiny" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
         {syncing ? <p className="sidebar__sync mono">Syncing notes…</p> : null}
       </div>
     </aside>

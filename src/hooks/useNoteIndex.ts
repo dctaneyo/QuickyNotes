@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '../lib/api'
 import type { NoteSummary } from '../lib/types'
+import type { Realtime } from '../sync/useEvents'
 
 const CACHE_PREFIX = 'quicky.notes.cache.v2'
 const QUEUE_PREFIX = 'quicky.notes.queue.v2'
@@ -58,12 +59,19 @@ function writeQueue(key: string, queue: Queue): void {
  * The note list index. Summaries come from the server, are cached per account
  * for offline use, and are updated live from whichever note is open.
  */
-export function useNoteIndex(token: string | null, userId: string | null) {
+export function useNoteIndex(
+  token: string | null,
+  userId: string | null,
+  events: Realtime,
+) {
+  const { subscribe } = events
   const cacheKey = `${CACHE_PREFIX}.${userId ?? 'anon'}`
   const queueKey = `${QUEUE_PREFIX}.${userId ?? 'anon'}`
   const [notes, setNotes] = useState<NoteSummary[]>(() => readCache(cacheKey))
   const [syncing, setSyncing] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
+  const notesRef = useRef(notes)
+  notesRef.current = notes
   const tokenRef = useRef(token)
   tokenRef.current = token
   const cacheKeyRef = useRef(cacheKey)
@@ -78,28 +86,6 @@ export function useNoteIndex(token: string | null, userId: string | null) {
   useEffect(() => {
     writeCache(cacheKey, notes)
   }, [cacheKey, notes])
-
-  const refresh = useCallback(async () => {
-    const currentToken = tokenRef.current
-    if (!currentToken) return
-    setSyncing(true)
-    try {
-      const result = await api<{ notes: NoteSummary[] }>('/api/notes', { token: currentToken })
-      const queue = readQueue(queueKeyRef.current)
-      setNotes((previous) => {
-        const localOnly = previous.filter(
-          (note) => note.pending || queue.create.includes(note.id),
-        )
-        const serverIds = new Set(result.notes.map((note) => note.id))
-        return [...result.notes, ...localOnly.filter((note) => !serverIds.has(note.id))]
-      })
-      setLastError(null)
-    } catch (error) {
-      if (error instanceof ApiError && error.status !== 0) setLastError(error.message)
-    } finally {
-      setSyncing(false)
-    }
-  }, [])
 
   const flush = useCallback(async () => {
     const currentToken = tokenRef.current
@@ -192,47 +178,69 @@ export function useNoteIndex(token: string | null, userId: string | null) {
     }
   }, [])
 
+  const emptyTrash = useCallback(async () => {
+    const currentToken = tokenRef.current
+    if (!currentToken) throw new Error('Sign in again to empty the trash.')
+    const trashed = notesRef.current
+      .filter((note) => note.trashed)
+      .map((note) => note.id)
+    await api('/api/notes/trash', { method: 'DELETE', token: currentToken })
+    setNotes((previous) => previous.filter((note) => !note.trashed))
+    const queue = readQueue(queueKeyRef.current)
+    const removed = new Set(trashed)
+    queue.create = queue.create.filter((id) => !removed.has(id))
+    queue.delete = queue.delete.filter((id) => !removed.has(id))
+    writeQueue(queueKeyRef.current, queue)
+  }, [])
+
   useEffect(() => {
     if (!token) return
-    void (async () => {
-      await flush()
-      await refresh()
-    })()
-  }, [token, flush, refresh])
+    void flush()
+  }, [token, flush])
 
   useEffect(() => {
     if (!token) return
     const onOnline = () => {
-      void (async () => {
-        await flush()
-        await refresh()
-      })()
+      void flush()
     }
     const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void flush().then(() => refresh())
-      }
+      if (document.visibilityState === 'visible') void flush()
     }
     window.addEventListener('online', onOnline)
     document.addEventListener('visibilitychange', onVisible)
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && navigator.onLine) void refresh()
-    }, 60_000)
     return () => {
       window.removeEventListener('online', onOnline)
       document.removeEventListener('visibilitychange', onVisible)
-      window.clearInterval(interval)
     }
-  }, [token, flush, refresh])
+  }, [token, flush])
+
+  useEffect(() => {
+    return subscribe((event) => {
+      if (event.type !== 'notes:snapshot') return
+      const queue = readQueue(queueKeyRef.current)
+      const deleted = new Set(queue.delete)
+      setNotes((previous) => {
+        const localOnly = previous.filter(
+          (note) =>
+            (note.pending || queue.create.includes(note.id)) && !deleted.has(note.id),
+        )
+        const serverNotes = event.notes.filter((note) => !deleted.has(note.id))
+        const serverIds = new Set(serverNotes.map((note) => note.id))
+        return [...serverNotes, ...localOnly.filter((note) => !serverIds.has(note.id))]
+      })
+      setLastError(null)
+      setSyncing(false)
+    })
+  }, [subscribe])
 
   return {
     notes,
     syncing,
     lastError,
-    refresh,
     registerNote,
     updateSummary,
     removeLocal,
     deleteForever,
+    emptyTrash,
   }
 }

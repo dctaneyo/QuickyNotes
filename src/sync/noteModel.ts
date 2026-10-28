@@ -1,5 +1,9 @@
 import * as Y from 'yjs'
 import type { BlockType } from '../lib/types'
+import {
+  normalizeBlockFormat,
+  type BlockFormat,
+} from '../lib/formatting'
 import { uid } from '../lib/notes'
 
 export interface NoteMetaValues {
@@ -18,6 +22,7 @@ export interface BlockSeed {
   text: string
   checked?: boolean
   indent?: number
+  format?: Partial<BlockFormat>
 }
 
 export interface BlockView {
@@ -26,6 +31,7 @@ export interface BlockView {
   text: string
   checked: boolean
   indent: number
+  format: BlockFormat
 }
 
 const BLOCK_TYPES = new Set<BlockType>([
@@ -77,6 +83,55 @@ export function blockTextNode(block: Y.Map<unknown>): Y.Text {
   return text
 }
 
+export function blockFormatOf(block: Y.Map<unknown>): BlockFormat {
+  return normalizeBlockFormat({
+    bold: block.get('bold') === true,
+    italic: block.get('italic') === true,
+    underline: block.get('underline') === true,
+    strike: block.get('strike') === true,
+    fontSize: Number(block.get('fontSize')) || null,
+    color: typeof block.get('color') === 'string' ? (block.get('color') as string) : null,
+    highlight:
+      typeof block.get('highlight') === 'string' ? (block.get('highlight') as string) : null,
+  })
+}
+
+function writeBlockFormat(block: Y.Map<unknown>, format: BlockFormat): void {
+  if (format.bold) block.set('bold', true)
+  if (format.italic) block.set('italic', true)
+  if (format.underline) block.set('underline', true)
+  if (format.strike) block.set('strike', true)
+  if (format.fontSize) block.set('fontSize', format.fontSize)
+  if (format.color) block.set('color', format.color)
+  if (format.highlight) block.set('highlight', format.highlight)
+}
+
+export function applyBlockFormat(
+  block: Y.Map<unknown>,
+  patch: Partial<BlockFormat>,
+): void {
+  const current = blockFormatOf(block)
+  const next = normalizeBlockFormat({ ...current, ...patch })
+  const apply = (key: 'bold' | 'italic' | 'underline' | 'strike') => {
+    if (next[key]) block.set(key, true)
+    else block.delete(key)
+  }
+  apply('bold')
+  apply('italic')
+  apply('underline')
+  apply('strike')
+  if (next.fontSize) block.set('fontSize', next.fontSize)
+  else block.delete('fontSize')
+  if (next.color) block.set('color', next.color)
+  else block.delete('color')
+  if (next.highlight) block.set('highlight', next.highlight)
+  else block.delete('highlight')
+}
+
+export function clearBlockFormat(block: Y.Map<unknown>): void {
+  applyBlockFormat(block, { ...normalizeBlockFormat(null) })
+}
+
 export function blockView(block: Y.Map<unknown>): BlockView {
   const type = block.get('type')
   return {
@@ -85,6 +140,7 @@ export function blockView(block: Y.Map<unknown>): BlockView {
     text: blockTextNode(block).toString(),
     checked: block.get('checked') === true,
     indent: Number(block.get('indent')) || 0,
+    format: blockFormatOf(block),
   }
 }
 
@@ -110,6 +166,7 @@ export function createBlock(doc: Y.Doc, index: number, seed: BlockSeed): Y.Map<u
     block.set('type', seed.type)
     block.set('indent', seed.indent ?? 0)
     block.set('checked', seed.checked === true)
+    writeBlockFormat(block, normalizeBlockFormat(seed.format))
     const text = new Y.Text()
     if (seed.text) text.insert(0, seed.text)
     block.set('text', text)
@@ -190,6 +247,7 @@ export function seedDocument(
       block.set('type', seed.type)
       block.set('indent', seed.indent ?? 0)
       block.set('checked', seed.checked === true)
+      writeBlockFormat(block, normalizeBlockFormat(seed.format))
       const text = new Y.Text()
       if (seed.text) text.insert(0, seed.text)
       block.set('text', text)
