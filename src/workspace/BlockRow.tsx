@@ -1,0 +1,489 @@
+import { useEffect, useReducer, useRef } from 'react'
+import type * as Y from 'yjs'
+import { blockArray, blockTextNode, blockView, applyTextEdit } from '../sync/noteModel'
+import type { BlockType } from '../lib/types'
+import type { Peer } from '../sync/useNoteSync'
+import { filterSlash } from './SlashMenu'
+
+export interface FocusRequest {
+  blockId: string
+  at: 'start' | 'end'
+  nonce: number
+}
+
+export interface SlashState {
+  blockId: string
+  query: string
+  top: number
+  left: number
+  index: number
+}
+
+export interface BlockRowApi {
+  insertAfter: (index: number, seed: { type: BlockType; text: string; indent: number }) => string
+  remove: (index: number) => void
+  move: (from: number, to: number) => void
+  requestFocus: (blockId: string, at: 'start' | 'end') => void
+  clearFocus: () => void
+  setSlash: (state: SlashState | null) => void
+  slash: SlashState | null
+  onPickCommand: (type: BlockType) => void
+  setDrag: (index: number | null) => void
+  dragIndex: number | null
+  dropIndex: number | null
+  setDropIndex: (index: number | null) => void
+  onDropAt: (index: number) => void
+}
+
+interface BlockRowProps {
+  doc: Y.Doc
+  block: Y.Map<unknown>
+  index: number
+  order: number | null
+  focusRequest: FocusRequest | null
+  remotePeer: Peer | undefined
+  api: BlockRowApi
+  onEdited: () => void
+  onFocusBlock: (blockId: string | null) => void
+}
+
+const MARKDOWN_TRIGGERS: Record<string, BlockType> = {
+  '#': 'h1',
+  '##': 'h2',
+  '###': 'h3',
+  '-': 'bullet',
+  '*': 'bullet',
+  '1.': 'number',
+  '[]': 'todo',
+  '[ ]': 'todo',
+  '>': 'quote',
+  '```': 'code',
+  '---': 'divider',
+}
+
+const CONTINUES: Partial<Record<BlockType, BlockType>> = {
+  bullet: 'bullet',
+  number: 'number',
+  todo: 'todo',
+  quote: 'quote',
+}
+
+function autoGrow(el: HTMLTextAreaElement) {
+  el.style.height = 'auto'
+  el.style.height = `${Math.max(el.scrollHeight, 26)}px`
+}
+
+function placeholderFor(type: BlockType): string {
+  switch (type) {
+    case 'h1':
+      return 'Heading 1'
+    case 'h2':
+      return 'Heading 2'
+    case 'h3':
+      return 'Heading 3'
+    case 'code':
+      return 'Code'
+    case 'quote':
+      return 'Quote'
+    case 'callout':
+      return 'Callout'
+    case 'todo':
+      return 'To-do'
+    case 'bullet':
+    case 'number':
+      return 'List item'
+    default:
+      return "Write something, or press '/' for blocks"
+  }
+}
+
+export function BlockRow({
+  doc,
+  block,
+  index,
+  order,
+  focusRequest,
+  remotePeer,
+  api,
+  onEdited,
+  onFocusBlock,
+}: BlockRowProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const text = blockTextNode(block)
+  const view = blockView(block)
+  const apiRef = useRef(api)
+  apiRef.current = api
+  const [, refreshBlock] = useReducer((value: number) => value + 1, 0)
+
+  // Type, checkbox and indentation live on the map, so re-render on its changes
+  // rather than waiting for an unrelated parent update.
+  useEffect(() => {
+    const handler = () => refreshBlock()
+    block.observe(handler)
+    return () => block.unobserve(handler)
+  }, [block])
+
+  // Keep the textarea in step with Yjs, including edits from other people.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    const sync = () => {
+      const next = text.toString()
+      if (el.value !== next) {
+        const focused = document.activeElement === el
+        const start = el.selectionStart
+        const end = el.selectionEnd
+        el.value = next
+        if (focused) {
+          const caret = Math.min(start, next.length)
+          el.setSelectionRange(caret, Math.min(end, next.length))
+        }
+      }
+      autoGrow(el)
+    }
+    sync()
+    text.observe(sync)
+    return () => text.unobserve(sync)
+  }, [text])
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (el) autoGrow(el)
+  }, [view.type])
+
+  useEffect(() => {
+    if (!focusRequest || focusRequest.blockId !== view.id) return
+    const el = textareaRef.current
+    if (!el) return
+    el.focus()
+    const position = focusRequest.at === 'end' ? el.value.length : 0
+    el.setSelectionRange(position, position)
+    autoGrow(el)
+    apiRef.current.clearFocus()
+  }, [focusRequest, view.id])
+
+  const slashOpen = api.slash?.blockId === view.id
+
+  const applySlash = (type: BlockType) => {
+    const el = textareaRef.current
+    if (el) el.value = ''
+    text.delete(0, text.length)
+    block.set('type', type)
+    block.set('checked', false)
+    api.setSlash(null)
+    api.requestFocus(view.id, 'start')
+    onEdited()
+  }
+
+  const maybeOpenSlash = (el: HTMLTextAreaElement) => {
+    if (view.type === 'code') return
+    const value = el.value
+    if (/^\/[a-z0-9]*$/i.test(value)) {
+      const rect = el.getBoundingClientRect()
+      api.setSlash({
+        blockId: view.id,
+        query: value.slice(1),
+        top: rect.bottom + 8,
+        left: rect.left,
+        index: 0,
+      })
+    } else if (api.slash?.blockId === view.id) {
+      api.setSlash(null)
+    }
+  }
+
+  const handleInput = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const el = event.currentTarget
+    applyTextEdit(text, el.value)
+    autoGrow(el)
+    maybeOpenSlash(el)
+    onEdited()
+  }
+
+  const mergeIntoPrevious = () => {
+    const blocks = blockArray(doc)
+    if (index === 0) return
+    const previous = blocks.get(index - 1)
+    const previousView = blockView(previous)
+    const previousText = blockTextNode(previous)
+    const current = text.toString()
+    if (current) previousText.insert(previousText.length, current)
+    blocks.delete(index, 1)
+    api.requestFocus(previousView.id, 'end')
+    onEdited()
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const el = event.currentTarget
+    const items = api.slash ? filterSlash(api.slash.query) : []
+
+    if (slashOpen && api.slash) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        const next = items.length ? (api.slash.index + 1) % items.length : 0
+        api.setSlash({ ...api.slash, index: next })
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        const next = items.length ? (api.slash.index - 1 + items.length) % items.length : 0
+        api.setSlash({ ...api.slash, index: next })
+        return
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        const choice = items[api.slash.index]
+        if (choice) applySlash(choice.type)
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        api.setSlash(null)
+        return
+      }
+    }
+
+    if (event.key === ' ' && view.type === 'text') {
+      const trigger = el.value.trim()
+      const type = MARKDOWN_TRIGGERS[trigger]
+      if (type && el.value.length === trigger.length) {
+        event.preventDefault()
+        text.delete(0, text.length)
+        block.set('type', type)
+        onEdited()
+        return
+      }
+    }
+
+    if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault()
+      const position = el.selectionStart
+      if (view.type === 'code' || event.shiftKey) {
+        const value = el.value
+        applyTextEdit(text, `${value.slice(0, position)}\n${value.slice(el.selectionEnd)}`)
+        window.requestAnimationFrame(() => {
+          el.selectionStart = position + 1
+          el.selectionEnd = position + 1
+          autoGrow(el)
+        })
+        onEdited()
+        return
+      }
+      const value = el.value
+      const before = value.slice(0, position)
+      const after = value.slice(position)
+      if (!value.trim() && (view.type === 'bullet' || view.type === 'number' || view.type === 'todo')) {
+        block.set('type', 'text')
+        onEdited()
+        return
+      }
+      applyTextEdit(text, before)
+      const nextType = CONTINUES[view.type] ?? 'text'
+      const newId = api.insertAfter(index, { type: nextType, text: after, indent: view.indent })
+      api.requestFocus(newId, 'start')
+      onEdited()
+      return
+    }
+
+    if (event.key === 'Backspace' && el.selectionStart === 0 && el.selectionEnd === 0) {
+      if (view.indent > 0) {
+        event.preventDefault()
+        block.set('indent', view.indent - 1)
+        onEdited()
+        return
+      }
+      if (view.type !== 'text') {
+        event.preventDefault()
+        block.set('type', 'text')
+        onEdited()
+        return
+      }
+      if (index > 0) {
+        event.preventDefault()
+        mergeIntoPrevious()
+      }
+      return
+    }
+
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      const next = Math.min(3, Math.max(0, view.indent + (event.shiftKey ? -1 : 1)))
+      if (next !== view.indent) {
+        block.set('indent', next)
+        onEdited()
+      }
+      return
+    }
+
+    if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      event.preventDefault()
+      api.move(index, index + (event.key === 'ArrowUp' ? -1 : 1))
+      return
+    }
+
+    if (event.key === 'ArrowUp' && el.selectionStart === 0 && el.selectionEnd === 0 && index > 0) {
+      event.preventDefault()
+      api.requestFocus(blockView(blockArray(doc).get(index - 1)).id, 'end')
+      return
+    }
+
+    if (
+      event.key === 'ArrowDown' &&
+      el.selectionStart === el.value.length &&
+      el.selectionEnd === el.value.length &&
+      index < blockArray(doc).length - 1
+    ) {
+      event.preventDefault()
+      api.requestFocus(blockView(blockArray(doc).get(index + 1)).id, 'start')
+      return
+    }
+  }
+
+  if (view.type === 'divider') {
+    return (
+      <div
+        className={`block block--divider${api.dropIndex === index ? ' is-drop' : ''}`}
+        data-block-id={view.id}
+        onDragOver={(event) => {
+          if (api.dragIndex === null) return
+          event.preventDefault()
+          api.setDropIndex(index)
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          api.onDropAt(index)
+        }}
+      >
+        <div className="block__gutter">
+          <button type="button" className="gutter-btn" onClick={() => api.remove(index)} aria-label="Delete divider">
+            ×
+          </button>
+        </div>
+        <hr className="block__rule" />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={`block block--${view.type}${view.checked ? ' is-checked' : ''}${
+        api.dropIndex === index ? ' is-drop' : ''
+      }${api.dragIndex === index ? ' is-dragging' : ''}${
+        remotePeer ? ' has-remote' : ''
+      }`}
+      style={
+        {
+          marginLeft: `${view.indent * 22}px`,
+          ...(remotePeer ? { ['--remote-color' as string]: remotePeer.color } : {}),
+        } as React.CSSProperties
+      }
+      data-block-id={view.id}
+      onDragOver={(event) => {
+        if (api.dragIndex === null) return
+        event.preventDefault()
+        api.setDropIndex(index)
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        api.onDropAt(index)
+      }}
+    >
+      <div className="block__gutter">
+        <button
+          type="button"
+          className="gutter-btn gutter-btn--add"
+          onClick={() => {
+            const id = api.insertAfter(index, { type: 'text', text: '', indent: view.indent })
+            api.requestFocus(id, 'start')
+          }}
+          aria-label="Add block below"
+          title="Add block below"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className="gutter-btn gutter-btn--grip"
+          draggable
+          onDragStart={() => api.setDrag(index)}
+          onDragEnd={() => api.setDrag(null)}
+          aria-label="Drag to reorder"
+          title="Drag to reorder"
+        >
+          ⠿
+        </button>
+        <button
+          type="button"
+          className="gutter-btn gutter-btn--delete"
+          onClick={() => api.remove(index)}
+          aria-label="Delete block"
+          title="Delete block"
+        >
+          ×
+        </button>
+      </div>
+
+      {view.type === 'todo' ? (
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={view.checked}
+          className="todo__box"
+          onClick={() => {
+            block.set('checked', !view.checked)
+            onEdited()
+          }}
+          aria-label={view.checked ? 'Mark as not done' : 'Mark as done'}
+        >
+          {view.checked ? (
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+              <path
+                d="M5 12.5l4.5 4.5L19 7"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          ) : null}
+        </button>
+      ) : null}
+
+      {view.type === 'bullet' ? (
+        <span className="block__marker" aria-hidden="true">
+          •
+        </span>
+      ) : null}
+
+      {view.type === 'number' ? (
+        <span className="block__marker block__marker--number" aria-hidden="true">
+          {order ?? 1}.
+        </span>
+      ) : null}
+
+      {remotePeer ? (
+        <span className="block__remote" style={{ background: remotePeer.color }}>
+          {remotePeer.displayName}
+        </span>
+      ) : null}
+
+      <textarea
+        ref={textareaRef}
+        className={`block__input block__input--${view.type}`}
+        defaultValue={view.text}
+        placeholder={placeholderFor(view.type)}
+        rows={1}
+        spellCheck
+        onChange={handleInput}
+        onKeyDown={handleKeyDown}
+        onFocus={() => {
+          onFocusBlock(view.id)
+          if (api.slash && api.slash.blockId !== view.id) api.setSlash(null)
+        }}
+        onBlur={() => onFocusBlock(null)}
+        aria-label={view.type === 'text' ? 'Note text' : `${view.type} block`}
+      />
+    </div>
+  )
+}

@@ -1,0 +1,41 @@
+{
+  "name": "quicky-notes",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Quicky Notes — a fast, collaborative note workspace with 8-digit accounts and offline editing.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c magenta,cyan \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "node --watch server/index.js",
+    "dev:web": "vite",
+    "build": "tsc -b && vite build",
+    "start": "node server/index.js",
+    "lint": "oxlint"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "lib0": "^0.2.119",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "ws": "^8.19.0",
+    "y-indexeddb": "^9.0.12",
+    "y-protocols": "^1.0.7",
+    "y-websocket": "^3.0.0",
+    "yjs": "^13.6.29"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^9.2.1",
+    "oxlint": "^1.89.0",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.5"
+  }
+}

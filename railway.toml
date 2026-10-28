@@ -1,0 +1,14 @@
+# Railway deployment for Quicky Notes.
+# One service runs the API, the WebSocket server and the built client.
+# Attach a volume and set DATA_DIR to its mount path (for example /data).
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm ci --include=dev && npm run build"
+
+[deploy]
+startCommand = "node server/index.js"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
