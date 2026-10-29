@@ -161,8 +161,10 @@ export function OnscreenKeyboard({
     width: number
   } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
-  const longPressTimer = useRef<number | null>(null)
-  const longPressFired = useRef(false)
+  // Press state is tracked per key. Fast typing overlaps presses, and a single
+  // shared timer let one key's hold fire after the next key was already tapped.
+  const pressTimers = useRef(new Map<string, number>())
+  const pressFired = useRef(new Set<string>())
   const previewTimer = useRef<number | null>(null)
   const backspaceDelay = useRef<number | null>(null)
   const backspaceInterval = useRef<number | null>(null)
@@ -204,11 +206,16 @@ export function OnscreenKeyboard({
     previewTimer.current = window.setTimeout(() => setPreview(null), 70)
   }
 
-  const cancelLongPress = () => {
-    if (longPressTimer.current !== null) {
-      window.clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
+  const clearPressTimer = (id: string) => {
+    const timer = pressTimers.current.get(id)
+    if (timer === undefined) return
+    window.clearTimeout(timer)
+    pressTimers.current.delete(id)
+  }
+
+  const clearAllPressTimers = () => {
+    for (const timer of pressTimers.current.values()) window.clearTimeout(timer)
+    pressTimers.current.clear()
   }
 
   const typeCharacter = (char: string) => {
@@ -217,26 +224,39 @@ export function OnscreenKeyboard({
     if (mode === 'shift') setMode('alpha')
   }
 
-  const startCharacterPress = (char: string, hint: string | undefined, element: HTMLElement) => {
+  const startCharacterPress = (
+    id: string,
+    char: string,
+    hint: string | undefined,
+    element: HTMLElement,
+  ) => {
     showPreview(char, element)
-    longPressFired.current = false
+    clearPressTimer(id)
+    pressFired.current.delete(id)
     if (!hint) return
-    longPressTimer.current = window.setTimeout(() => {
-      longPressTimer.current = null
-      longPressFired.current = true
-      onInsert(hint)
-      haptic(10)
-      setPreview((current) => (current ? { ...current, char: hint } : current))
-      if (mode === 'shift') setMode('alpha')
-    }, LONG_PRESS_MS)
+    pressTimers.current.set(
+      id,
+      window.setTimeout(() => {
+        pressTimers.current.delete(id)
+        pressFired.current.add(id)
+        onInsert(hint)
+        haptic(10)
+        setPreview((current) => (current ? { ...current, char: hint } : current))
+        if (mode === 'shift') setMode('alpha')
+      }, LONG_PRESS_MS),
+    )
   }
 
-  const endCharacterPress = (char: string) => {
+  const endCharacterPress = (id: string, char: string) => {
     hidePreview()
-    const longPressed = longPressFired.current
-    cancelLongPress()
-    longPressFired.current = false
+    clearPressTimer(id)
+    const longPressed = pressFired.current.delete(id)
     if (!longPressed) typeCharacter(char)
+  }
+
+  const cancelCharacterPress = (id: string) => {
+    clearPressTimer(id)
+    hidePreview()
   }
 
   const startBackspaceRepeat = () => {
@@ -268,7 +288,7 @@ export function OnscreenKeyboard({
     return () => {
       window.removeEventListener('blur', reset)
       reset()
-      if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current)
+      clearAllPressTimers()
       if (previewTimer.current !== null) window.clearTimeout(previewTimer.current)
     }
   }, [])
@@ -359,17 +379,11 @@ export function OnscreenKeyboard({
         aria-label={item.hint ? `${display}, hold for ${item.hint}` : display}
         onPointerDown={(event) => {
           event.preventDefault()
-          startCharacterPress(display, item.hint, event.currentTarget)
+          startCharacterPress(item.key, display, item.hint, event.currentTarget)
         }}
-        onPointerUp={() => endCharacterPress(display)}
-        onPointerCancel={() => {
-          cancelLongPress()
-          hidePreview()
-        }}
-        onPointerLeave={() => {
-          cancelLongPress()
-          hidePreview()
-        }}
+        onPointerUp={() => endCharacterPress(item.key, display)}
+        onPointerCancel={() => cancelCharacterPress(item.key)}
+        onPointerLeave={() => cancelCharacterPress(item.key)}
         onContextMenu={(event) => event.preventDefault()}
       >
         <span className="osk__char">{display}</span>
@@ -400,17 +414,12 @@ export function OnscreenKeyboard({
         aria-hidden="true"
         onPointerDown={(event) => {
           event.preventDefault()
-          startCharacterPress(display, item.hint, anchorFor(event.currentTarget))
+          const id = `edge-${side}`
+          startCharacterPress(id, display, item.hint, anchorFor(event.currentTarget))
         }}
-        onPointerUp={() => endCharacterPress(display)}
-        onPointerCancel={() => {
-          cancelLongPress()
-          hidePreview()
-        }}
-        onPointerLeave={() => {
-          cancelLongPress()
-          hidePreview()
-        }}
+        onPointerUp={() => endCharacterPress(`edge-${side}`, display)}
+        onPointerCancel={() => cancelCharacterPress(`edge-${side}`)}
+        onPointerLeave={() => cancelCharacterPress(`edge-${side}`)}
         onContextMenu={(event) => event.preventDefault()}
       />
     )
