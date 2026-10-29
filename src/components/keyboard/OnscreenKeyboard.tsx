@@ -502,8 +502,13 @@ export function OnscreenKeyboard({
             type="button"
             className="osk__hide"
             aria-label="Hide onscreen keyboard"
-            onPointerDown={(event) => {
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              // Dismiss after the tap completes. Unmounting on pointerdown
+              // handed the rest of the gesture to whatever block slid under
+              // the finger, which refocused and reopened the board.
               event.preventDefault()
+              event.stopPropagation()
               onDismiss()
             }}
           >
