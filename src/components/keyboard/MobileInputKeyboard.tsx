@@ -192,11 +192,18 @@ export function MobileInputKeyboard() {
   const prepared = useRef(new Map<TextField, string | null>())
   const caretRef = useRef<{ element: TextField; start: number; end: number } | null>(null)
   const blurTimer = useRef<number | null>(null)
+  const restoreTimer = useRef<number | null>(null)
   const nextKey = useRef(0)
 
   const rememberCaret = useCallback((field: TextField) => {
     const { start, end } = readCaret(field)
     caretRef.current = { element: field, start, end }
+  }, [])
+
+  const clearRestoreTimer = useCallback(() => {
+    if (restoreTimer.current === null) return
+    window.clearTimeout(restoreTimer.current)
+    restoreTimer.current = null
   }, [])
 
   /**
@@ -246,17 +253,47 @@ export function MobileInputKeyboard() {
         }
         rememberCaret(field)
       })
+
+      // Safari can drop the field after the click that follows pointerup. Keep
+      // one late pass, reading the live caret so fast typing is not rewound.
+      clearRestoreTimer()
+      restoreTimer.current = window.setTimeout(() => {
+        restoreTimer.current = null
+        if (!field.isConnected || activeRef.current?.element !== field) return
+        const focused = document.activeElement
+        const focusIsOurs =
+          focused === field ||
+          focused === document.body ||
+          focused === document.documentElement ||
+          focused === null ||
+          (focused instanceof Element &&
+            focused.closest('.osk') !== null &&
+            !focused.matches('input, textarea, select'))
+        if (!focusIsOurs) return
+        const live = readCaret(field)
+        if (focused !== field) field.focus({ preventScroll: true })
+        try {
+          field.setSelectionRange(live.start, live.end)
+        } catch {
+          // Some input types do not expose a selection range.
+        }
+        rememberCaret(field)
+      }, 120)
     },
-    [rememberCaret],
+    [clearRestoreTimer, rememberCaret],
   )
 
-  const deactivate = useCallback((blur = false) => {
-    const current = activeRef.current
-    if (!current) return
-    activeRef.current = null
-    setActive(null)
-    if (blur && document.activeElement === current.element) current.element.blur()
-  }, [])
+  const deactivate = useCallback(
+    (blur = false) => {
+      const current = activeRef.current
+      if (!current) return
+      clearRestoreTimer()
+      activeRef.current = null
+      setActive(null)
+      if (blur && document.activeElement === current.element) current.element.blur()
+    },
+    [clearRestoreTimer],
+  )
 
   const activate = useCallback((field: TextField) => {
     if (activeRef.current?.element === field) return
@@ -414,6 +451,7 @@ export function MobileInputKeyboard() {
       document.removeEventListener('selectionchange', onSelectionChange)
       observer.disconnect()
       clearBlurTimer()
+      clearRestoreTimer()
       deactivate()
       for (const [field, original] of originalModes) {
         if (!field.isConnected) continue
@@ -422,7 +460,7 @@ export function MobileInputKeyboard() {
       }
       originalModes.clear()
     }
-  }, [enabled, activate, deactivate, rememberCaret])
+  }, [enabled, activate, deactivate, rememberCaret, clearRestoreTimer])
 
   useEffect(() => {
     if (!enabled || !active) return
@@ -466,6 +504,7 @@ export function MobileInputKeyboard() {
       }}
       onMoveCaret={(delta) => withActiveField((field) => moveFieldCaret(field, delta))}
       onDismiss={() => deactivate(true)}
+      onKeepFocus={() => withActiveField(() => undefined)}
       onHeightChange={setHeight}
     />
   )

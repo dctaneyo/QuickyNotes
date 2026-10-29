@@ -10,6 +10,8 @@ export interface BlockKeyboardController {
   backspace: () => void
   newline: () => void
   moveCaret: (delta: number) => void
+  /** Put the caret back after a keyboard button was focused. */
+  refocus: () => void
   blur: () => void
 }
 
@@ -62,6 +64,10 @@ export function useBlockKeyboard() {
     [activeBlockId],
   )
 
+  const refocus = useCallback(() => {
+    if (activeBlockId) controllers.current.get(activeBlockId)?.refocus()
+  }, [activeBlockId])
+
   return {
     enabled,
     activeBlockId,
@@ -72,5 +78,6 @@ export function useBlockKeyboard() {
     backspace,
     newline,
     moveCaret,
+    refocus,
   }
 }

@@ -124,6 +124,8 @@ interface OnscreenKeyboardProps {
   onUndo?: () => void
   onRedo?: () => void
   onDismiss: () => void
+  /** Return focus to the text field when a key tries to take it. */
+  onKeepFocus?: () => void
   onHeightChange?: (height: number) => void
   formatBar?: ReactNode
   label?: string
@@ -143,6 +145,7 @@ export function OnscreenKeyboard({
   onUndo,
   onRedo,
   onDismiss,
+  onKeepFocus,
   onHeightChange,
   formatBar,
   label = 'Text',
@@ -429,6 +432,21 @@ export function OnscreenKeyboard({
         role="group"
         aria-label={`${label} onscreen keyboard`}
         data-keyboard-mode={mode}
+        onPointerDown={(event) => {
+          const target = event.target
+          if (target instanceof Element && target.closest('button')) event.preventDefault()
+        }}
+        onMouseDown={(event) => {
+          const target = event.target
+          if (target instanceof Element && target.closest('button')) event.preventDefault()
+        }}
+        onFocusCapture={(event) => {
+          const target = event.target
+          if (!(target instanceof Element)) return
+          // If a browser focuses a key despite the pointer guard, give the
+          // caret back to the field instead of leaving the editor blurred.
+          if (target.closest('button')) onKeepFocus?.()
+        }}
       >
         {formatBar ? <div className="osk__format">{formatBar}</div> : null}
 

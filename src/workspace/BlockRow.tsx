@@ -137,6 +137,7 @@ export function BlockRow({
 }: BlockRowProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const keyboardActionsRef = useRef<BlockKeyboardController | null>(null)
+  const focusRestoreTimer = useRef<number | null>(null)
   const text = blockTextNode(block)
   const view = blockView(block)
   const apiRef = useRef(api)
@@ -161,6 +162,7 @@ export function BlockRow({
   useEffect(() => {
     return () => {
       if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current)
+      if (focusRestoreTimer.current !== null) window.clearTimeout(focusRestoreTimer.current)
     }
   }, [])
 
@@ -312,6 +314,40 @@ export function BlockRow({
     maybeOpenSlash(el)
     onFocusBlock(view.id, el.selectionEnd)
     onEdited()
+    scheduleFocusRestore()
+  }
+
+  /**
+   * Safari can blur the textarea after the click that follows pointerup. Put
+   * the live caret back once more, without rewinding fast typing.
+   */
+  function scheduleFocusRestore() {
+    if (focusRestoreTimer.current !== null) window.clearTimeout(focusRestoreTimer.current)
+    focusRestoreTimer.current = window.setTimeout(() => {
+      focusRestoreTimer.current = null
+      const el = textareaRef.current
+      if (!el || !el.isConnected) return
+      // Do not reopen the board after it was dismissed or the note changed.
+      if (!document.querySelector('.note.has-keyboard')) return
+      const focused = document.activeElement
+      const focusIsOurs =
+        focused === el ||
+        focused === document.body ||
+        focused === document.documentElement ||
+        focused === null ||
+        (focused instanceof Element &&
+          focused.closest('.osk') !== null &&
+          !focused.matches('input, textarea, select'))
+      if (!focusIsOurs) return
+      const start = el.selectionStart ?? el.value.length
+      const end = el.selectionEnd ?? start
+      if (focused !== el) el.focus({ preventScroll: true })
+      try {
+        el.setSelectionRange(start, end)
+      } catch {
+        // Some block types do not expose a selection range.
+      }
+    }, 120)
   }
 
   /** Delete the selection, or the character immediately before the caret. */
@@ -332,6 +368,7 @@ export function BlockRow({
       insertFromKeyboard('')
       return
     }
+    scheduleFocusRestore()
     if (view.indent > 0) {
       block.set('indent', view.indent - 1)
       onEdited()
@@ -395,6 +432,21 @@ export function BlockRow({
         : Math.max(0, Math.min(el.value.length, start + delta))
     el.setSelectionRange(next, next)
     onFocusBlock(view.id, next)
+    scheduleFocusRestore()
+  }
+
+  /** Return the caret to the block if a board key took focus from it. */
+  const refocusFromKeyboard = () => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart ?? el.value.length
+    const end = el.selectionEnd ?? start
+    if (document.activeElement !== el) el.focus({ preventScroll: true })
+    try {
+      el.setSelectionRange(start, end)
+    } catch {
+      // Some block types do not expose a selection range.
+    }
   }
 
   useEffect(() => {
@@ -403,6 +455,7 @@ export function BlockRow({
       backspace: deleteFromKeyboard,
       newline: newlineFromKeyboard,
       moveCaret: moveCaretFromKeyboard,
+      refocus: refocusFromKeyboard,
       blur: () => textareaRef.current?.blur(),
     }
   })
@@ -414,6 +467,7 @@ export function BlockRow({
       backspace: () => keyboardActionsRef.current?.backspace(),
       newline: () => keyboardActionsRef.current?.newline(),
       moveCaret: (delta) => keyboardActionsRef.current?.moveCaret(delta),
+      refocus: () => keyboardActionsRef.current?.refocus(),
       blur: () => keyboardActionsRef.current?.blur(),
     }
     registerKeyboard(view.id, controller)

@@ -666,6 +666,7 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
           onUndo={() => undoRef.current?.undo()}
           onRedo={() => undoRef.current?.redo()}
           onDismiss={dismissKeyboard}
+          onKeepFocus={blockKeyboard.refocus}
           onHeightChange={setKeyboardHeight}
         />
       ) : null}
