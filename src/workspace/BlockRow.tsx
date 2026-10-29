@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useEffect, useReducer, useRef, type CSSProperties } from 'react'
 import type * as Y from 'yjs'
 import { blockArray, blockTextNode, blockView, applyTextEdit } from '../sync/noteModel'
 import { formatSignature, formatTextMetrics, formatTextStyle } from '../lib/formatting'
@@ -85,6 +85,10 @@ const CONTINUES: Partial<Record<BlockType, BlockType>> = {
   todo: 'todo',
   quote: 'quote',
 }
+
+// Lists keep their type and indentation when Return is pressed on an empty
+// item, so a template can be sketched one placeholder at a time.
+const LIST_TYPES = new Set<BlockType>(['bullet', 'number', 'todo'])
 
 function autoGrow(el: HTMLTextAreaElement) {
   el.style.height = 'auto'
@@ -356,8 +360,13 @@ export function BlockRow({
       insertFromKeyboard('\n')
       return
     }
-    if (!value.trim() && (view.type === 'bullet' || view.type === 'number' || view.type === 'todo')) {
-      block.set('type', 'text')
+    if (!value.trim() && LIST_TYPES.has(view.type)) {
+      const newId = api.insertAfter(index, {
+        type: view.type,
+        text: '',
+        indent: view.indent,
+      })
+      api.requestFocus(newId, 'start')
       onEdited()
       return
     }
@@ -499,8 +508,13 @@ export function BlockRow({
       const value = el.value
       const before = value.slice(0, position)
       const after = value.slice(position)
-      if (!value.trim() && (view.type === 'bullet' || view.type === 'number' || view.type === 'todo')) {
-        block.set('type', 'text')
+      if (!value.trim() && LIST_TYPES.has(view.type)) {
+        const newId = api.insertAfter(index, {
+          type: view.type,
+          text: '',
+          indent: view.indent,
+        })
+        api.requestFocus(newId, 'start')
         onEdited()
         return
       }
@@ -570,11 +584,11 @@ export function BlockRow({
     return (
       <div
         className={`block block--divider${readOnly ? ' is-readonly' : ''}${
-          api.dropIndex === index ? ' is-drop' : ''
+          api.dropIndex === index && api.dragIndex !== index ? ' is-drop' : ''
         }`}
         data-block-id={view.id}
         onDragOver={(event) => {
-          if (api.dragIndex === null) return
+          if (api.dragIndex === null || api.dragIndex === index) return
           event.preventDefault()
           api.setDropIndex(index)
         }}
@@ -601,13 +615,18 @@ export function BlockRow({
     <div
       className={`block block--${view.type}${view.checked ? ' is-checked' : ''}${
         readOnly ? ' is-readonly' : ''
-      }${api.dropIndex === index ? ' is-drop' : ''}${
+      }${api.dropIndex === index && api.dragIndex !== index ? ' is-drop' : ''}${
         api.dragIndex === index ? ' is-dragging' : ''
       }`}
-      style={{ marginLeft: `${view.indent * 22}px` }}
+      style={
+        {
+          marginLeft: `${view.indent * 22}px`,
+          '--block-indent': `${view.indent * 22}px`,
+        } as CSSProperties
+      }
       data-block-id={view.id}
       onDragOver={(event) => {
-        if (api.dragIndex === null) return
+        if (api.dragIndex === null || api.dragIndex === index) return
         event.preventDefault()
         api.setDropIndex(index)
       }}
@@ -637,8 +656,16 @@ export function BlockRow({
             className="gutter-btn gutter-btn--grip"
             draggable
             onClick={() => api.openFormat(view.id)}
-            onDragStart={() => api.setDrag(index)}
-            onDragEnd={() => api.setDrag(null)}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move'
+              event.dataTransfer.setData('text/plain', view.id)
+              api.setDropIndex(null)
+              api.setDrag(index)
+            }}
+            onDragEnd={() => {
+              api.setDrag(null)
+              api.setDropIndex(null)
+            }}
             aria-label="Block menu"
             title="Select to format · drag to reorder"
           >

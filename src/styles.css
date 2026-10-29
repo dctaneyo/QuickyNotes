@@ -1445,7 +1445,36 @@ p {
 }
 
 .block.is-drop {
-  box-shadow: 0 -2px 0 var(--accent);
+  z-index: 3;
+}
+
+/* A clear insertion line spans the editor, even when the target is indented. */
+.block.is-drop::before,
+.block.is-drop::after {
+  content: '';
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.block.is-drop::before {
+  top: -4px;
+  right: -4px;
+  left: calc(0px - var(--block-indent, 0px) - 4px);
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.block.is-drop::after {
+  top: -7px;
+  left: calc(0px - var(--block-indent, 0px) - 8px);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
 }
 
 .block__input {
@@ -2022,10 +2051,10 @@ p {
 .fmt-bar {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   width: 100%;
   min-height: 34px;
-  padding: 1px 1px 2px;
+  padding: 1px 2px 2px;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
@@ -2046,7 +2075,7 @@ p {
   flex: 0 0 1px;
   width: 1px;
   height: 18px;
-  margin: 0 4px;
+  margin: 0 5px;
   background: var(--line);
 }
 
@@ -2249,7 +2278,7 @@ p {
 }
 
 .fmt-group--colors {
-  gap: 3px;
+  gap: 7px;
 }
 
 .fmt-color-label {
@@ -2416,7 +2445,7 @@ p {
 }
 
 .format-bar--tray .fmt-group--colors {
-  gap: 4px;
+  gap: 7px;
 }
 
 .format-bar--tray .fmt-close {
@@ -2434,7 +2463,7 @@ p {
   }
 
   .fmt-divider {
-    margin: 0 3px;
+    margin: 0 4px;
   }
 }
 
@@ -2460,7 +2489,7 @@ p {
 
 .format-bar--keyboard .fmt-bar {
   min-height: 38px;
-  padding: 2px 1px 3px;
+  padding: 2px 3px 3px;
   scrollbar-width: none;
 }
 
@@ -2496,7 +2525,7 @@ p {
 }
 
 .format-bar--keyboard .fmt-group--colors {
-  gap: 3px;
+  gap: 7px;
 }
 
 .fmt-size__value {
