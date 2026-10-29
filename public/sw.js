@@ -1,12 +1,14 @@
-const CACHE = 'quicky-shell-v3'
+const CACHE = 'quicky-shell-v4'
 const PRECACHE = [
   '/manifest.webmanifest',
   '/app-icons/favicon.svg',
   '/app-icons/favicon-32.png',
-  '/app-icons/icon-180.png',
-  '/app-icons/icon-192.png',
-  '/app-icons/icon-512.png',
-  '/app-icons/icon-maskable-512.png',
+  '/app-icons/pwa/apple-touch-icon-180.png',
+  '/app-icons/pwa/apple-touch-icon-167.png',
+  '/app-icons/pwa/apple-touch-icon-152.png',
+  '/app-icons/pwa/icon-192.png',
+  '/app-icons/pwa/icon-512.png',
+  '/app-icons/pwa/icon-maskable-512.png',
   '/apple-touch-icon.png',
 ]
 

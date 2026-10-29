@@ -1,7 +1,7 @@
 {
   "id": "/",
   "name": "Quicky Notes",
-  "short_name": "Quicky",
+  "short_name": "Quicky Notes",
   "description": "A fast, collaborative notebook. Catch a thought in one line, organise it later, and keep writing offline.",
   "start_url": "/?source=pwa",
   "scope": "/",
@@ -15,25 +15,25 @@
   "categories": ["productivity", "utilities"],
   "icons": [
     {
-      "src": "/app-icons/icon-180.png",
+      "src": "/app-icons/pwa/apple-touch-icon-180.png",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/app-icons/icon-192.png",
+      "src": "/app-icons/pwa/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/app-icons/icon-512.png",
+      "src": "/app-icons/pwa/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/app-icons/icon-maskable-512.png",
+      "src": "/app-icons/pwa/icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
