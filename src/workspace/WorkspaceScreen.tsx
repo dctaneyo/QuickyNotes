@@ -96,19 +96,14 @@ export function WorkspaceScreen() {
     setActiveRef.current(selectedId)
   }, [selectedId])
 
+  // The open note must still exist and belong to the current trash context.
+  // Waiting for the note summary means a trash change is saved before the
+  // editor unmounts.
   useEffect(() => {
-    if (selectedId && !notes.some((note) => note.id === selectedId) && !index.syncing) {
-      setSelectedId(null)
-    }
-  }, [notes, selectedId, index.syncing])
-
-  // A trashed note belongs only in the trash view, and a restored note no
-  // longer belongs there. Wait for the summary update so the change is saved
-  // before the editor unmounts.
-  useEffect(() => {
-    if (!selected) return
-    if (selected.trashed !== viewingTrash) setSelectedId(null)
-  }, [selected, viewingTrash])
+    if (!selectedId || index.syncing) return
+    const current = notes.find((note) => note.id === selectedId)
+    if (!current || current.trashed !== viewingTrash) setSelectedId(null)
+  }, [notes, selectedId, index.syncing, viewingTrash])
 
   useEffect(() => {
     if (templateOpen) events.requestTemplates()
