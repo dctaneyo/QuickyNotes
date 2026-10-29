@@ -2617,7 +2617,31 @@ p {
 }
 
 .osk__row--inset {
+  position: relative;
   padding: 0 5.2%;
+}
+
+/* Keep the inset visual edge but let taps there hit the first and last keys. */
+.osk__edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 5.2%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.osk__edge--left {
+  left: 0;
+}
+
+.osk__edge--right {
+  right: 0;
 }
 
 .osk__key {

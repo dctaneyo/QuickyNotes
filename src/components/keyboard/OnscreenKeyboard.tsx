@@ -382,6 +382,40 @@ export function OnscreenKeyboard({
     )
   }
 
+  /** Invisible edge of the inset letter row; taps fall through to a or l. */
+  const edgeKey = (item: KeyHint, side: 'left' | 'right') => {
+    const display = isUpper ? item.key.toUpperCase() : item.key
+    const anchorFor = (element: HTMLElement) => {
+      const row = element.parentElement
+      const keys = row?.querySelectorAll<HTMLElement>('.osk__key--char')
+      if (!keys?.length) return element
+      return side === 'left' ? keys[0] : keys[keys.length - 1]
+    }
+    return (
+      <button
+        key={`edge-${side}`}
+        type="button"
+        className={`osk__edge osk__edge--${side}`}
+        tabIndex={-1}
+        aria-hidden="true"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          startCharacterPress(display, item.hint, anchorFor(event.currentTarget))
+        }}
+        onPointerUp={() => endCharacterPress(display)}
+        onPointerCancel={() => {
+          cancelLongPress()
+          hidePreview()
+        }}
+        onPointerLeave={() => {
+          cancelLongPress()
+          hidePreview()
+        }}
+        onContextMenu={(event) => event.preventDefault()}
+      />
+    )
+  }
+
   const symbolKey = (char: string) => (
     <button
       key={char}
@@ -476,7 +510,11 @@ export function OnscreenKeyboard({
           {isAlpha ? (
             <>
               <div className="osk__row">{ROW1.map(characterKey)}</div>
-              <div className="osk__row osk__row--inset">{ROW2.map(characterKey)}</div>
+              <div className="osk__row osk__row--inset">
+                {edgeKey(ROW2[0], 'left')}
+                {ROW2.map(characterKey)}
+                {edgeKey(ROW2[ROW2.length - 1], 'right')}
+              </div>
               <div className="osk__row">
                 <button
                   type="button"
