@@ -1085,7 +1085,7 @@ p {
 
 .note__format-dock {
   flex: 0 0 auto;
-  padding: 8px clamp(16px, 4vw, 56px) 10px;
+  padding: 10px clamp(14px, 2.5vw, 28px) 12px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 97%, transparent);
   backdrop-filter: blur(14px);
@@ -1970,17 +1970,17 @@ p {
 .format-bar--docked {
   position: static;
   width: 100%;
-  max-width: 940px;
-  margin: 0 auto;
-  padding: 5px;
-  border: 1px solid rgba(23, 26, 23, 0.1);
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .format-bar--docked .fmt-bar {
-  min-height: 36px;
+  min-height: 40px;
 }
 
 .format-bar--popover {
