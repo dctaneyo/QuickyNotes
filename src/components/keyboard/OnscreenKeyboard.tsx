@@ -127,11 +127,12 @@ interface OnscreenKeyboardProps {
   onHeightChange?: (height: number) => void
   formatBar?: ReactNode
   label?: string
+  initialMode?: 'text' | 'numbers'
 }
 
 /**
  * A pointer-first replacement for the native mobile keyboard. It edits the real
- * block textarea, so selections, collaboration carets and hardware input keep
+ * focused field, so selections, collaboration carets and hardware input keep
  * working while the board is open.
  */
 export function OnscreenKeyboard({
@@ -144,9 +145,10 @@ export function OnscreenKeyboard({
   onDismiss,
   onHeightChange,
   formatBar,
-  label = 'Note',
+  label = 'Text',
+  initialMode = 'text',
 }: OnscreenKeyboardProps) {
-  const [mode, setMode] = useState<KeyboardMode>('alpha')
+  const [mode, setMode] = useState<KeyboardMode>(initialMode === 'numbers' ? 'numbers' : 'alpha')
   const [returnTo, setReturnTo] = useState<'alpha' | 'shift' | 'caps'>('alpha')
   const [emojiCategory, setEmojiCategory] = useState(0)
   const [preview, setPreview] = useState<{

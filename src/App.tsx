@@ -1,4 +1,5 @@
 import { AuthProvider, useAuth } from './auth/AuthContext'
+import { MobileInputKeyboard } from './components/keyboard/MobileInputKeyboard'
 import { AuthScreen } from './screens/AuthScreen'
 import { WorkspaceScreen } from './workspace/WorkspaceScreen'
 
@@ -24,6 +25,7 @@ export default function App() {
   return (
     <AuthProvider>
       <Gate />
+      <MobileInputKeyboard />
     </AuthProvider>
   )
 }

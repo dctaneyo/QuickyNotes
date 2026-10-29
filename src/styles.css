@@ -2501,7 +2501,7 @@ p {
   position: fixed;
   bottom: 0;
   left: 50%;
-  z-index: 95;
+  z-index: 130;
   width: min(860px, 100%);
   margin: 0;
   padding: 0 8px calc(8px + env(safe-area-inset-bottom));
@@ -2772,7 +2772,7 @@ p {
 
 .osk__preview {
   position: fixed;
-  z-index: 121;
+  z-index: 131;
   display: grid;
   place-items: center;
   height: 52px;
@@ -2792,6 +2792,36 @@ p {
 
 .note.has-keyboard .block {
   scroll-margin-bottom: calc(var(--kb-height, 320px) + 20px);
+}
+
+/* The app-wide board (title, tags, search, settings, sharing, admin, dialogs). */
+body.has-onscreen-keyboard .note__scroll {
+  padding-bottom: calc(var(--osk-height, 320px) + 30px + env(safe-area-inset-bottom));
+}
+
+body.has-onscreen-keyboard .list__scroll {
+  padding-bottom: calc(104px + var(--osk-height, 320px) + env(safe-area-inset-bottom));
+}
+
+body.has-onscreen-keyboard .admin__main {
+  padding-bottom: calc(60px + var(--osk-height, 320px) + env(safe-area-inset-bottom));
+}
+
+body.has-onscreen-keyboard .auth__panel {
+  padding-bottom: calc(var(--osk-height, 320px) + 28px + env(safe-area-inset-bottom));
+}
+
+body.has-onscreen-keyboard .modal {
+  padding-bottom: calc(20px + var(--osk-height, 320px));
+}
+
+body.has-onscreen-keyboard .modal__panel {
+  max-height: calc(100dvh - var(--osk-height, 320px) - 40px);
+  border-radius: 18px;
+}
+
+body.has-onscreen-keyboard .toast {
+  bottom: calc(var(--osk-height, 320px) + 16px + env(safe-area-inset-bottom));
 }
 
 @media (min-width: 761px) {

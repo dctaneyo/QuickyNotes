@@ -29,11 +29,12 @@ WebSocket sync server and the built client — so it deploys as a single Railway
   custom font size, text colour, highlight, indentation and reset. It becomes a floating popover
   on desktop, scrolls sideways when space is tight, and is stored on the block so it survives
   collaboration, duplication and templates.
-- **Custom onscreen keyboard** on phones and tablets: the block editor hides the native keyboard
-  and opens a paper-themed board with the format rail docked at the top, shift/caps, numbers,
-  symbols, emoji, hold-to-delete, space-drag caret movement, undo/redo and a hide control. The real
-  textarea stays focused underneath, so selection, collaborative carets and hardware keyboards keep
-  working. Template blocks use the same board; short metadata fields keep the native keyboard.
+- **Custom onscreen keyboard** on phones and tablets: every text field hides the native keyboard
+  and opens a paper-themed board — note and template blocks, titles, tags, search, settings, sharing,
+  admin fields and dialogs. Numeric fields open on the number layout. The block editor docks the
+  format rail at the top; the board also has shift/caps, symbols, emoji, hold-to-delete, space-drag
+  caret movement, undo/redo for blocks and a hide control. The real field stays focused underneath,
+  so selection, collaborative carets and hardware keyboards keep working.
 - Slash menu (`/`) for block types, markdown shortcuts (`# `, `- `, `[] `, `> `, ` ``` `), Tab to
   indent, Alt+↑/↓ to move a block, drag handle to reorder, undo/redo with `⌘Z`.
 - Every note belongs to a day. New notes start on today, and **Move** re-files one to another
@@ -159,8 +160,8 @@ src/
 - Table/database blocks (Notion-style properties and views) are **not** implemented yet.
 - Formatting applies to the active block, not a text selection; selection-level rich text is not
   exposed. Paste is plain text.
-- The custom onscreen keyboard covers note and template blocks. The note title, tags, account
-  fields and dialog inputs still use the device keyboard.
+- The custom board covers text inputs on touch devices. Platform pickers for dates, colours and
+  selects still use the device UI, and a hardware keyboard always works alongside the board.
 - The service worker caches the app shell only. A note opened for the first time still needs a
   connection; notes already mirrored to IndexedDB open offline.
 - Presence shows each collaborator’s block caret and name tag; text selections are not highlighted.

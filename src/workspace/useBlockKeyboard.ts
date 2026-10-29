@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { useTouchKeyboardDevice } from '../hooks/useTouchKeyboard'
 
 /**
  * The block editor keeps the real textarea focused. These operations let the
@@ -12,29 +13,15 @@ export interface BlockKeyboardController {
   blur: () => void
 }
 
-const TOUCH_QUERY = '(pointer: coarse), (any-pointer: coarse) and (max-width: 1180px)'
-
-function isTouchKeyboardDevice(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia(TOUCH_QUERY).matches
-}
-
 /**
  * Registers each block's keyboard operations and tracks which block owns the
- * board. Only primary touch pointers use the custom keyboard; a mouse-driven
- * desktop keeps the regular textarea and native keyboard.
+ * board. Only touch devices use the custom keyboard; a mouse-driven desktop
+ * keeps the regular textarea and native keyboard.
  */
 export function useBlockKeyboard() {
-  const [enabled, setEnabled] = useState(isTouchKeyboardDevice)
+  const enabled = useTouchKeyboardDevice()
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null)
   const controllers = useRef(new Map<string, BlockKeyboardController>())
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const query = window.matchMedia(TOUCH_QUERY)
-    const update = () => setEnabled(query.matches)
-    query.addEventListener('change', update)
-    return () => query.removeEventListener('change', update)
-  }, [])
 
   const register = useCallback((blockId: string, controller: BlockKeyboardController | null) => {
     if (controller) controllers.current.set(blockId, controller)

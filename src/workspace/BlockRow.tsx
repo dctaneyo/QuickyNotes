@@ -752,6 +752,7 @@ export function BlockRow({
           rows={1}
           spellCheck
           inputMode={customKeyboard ? 'none' : undefined}
+          data-onscreen-keyboard="block"
           readOnly={readOnly}
           aria-readonly={readOnly}
           onChange={handleInput}
