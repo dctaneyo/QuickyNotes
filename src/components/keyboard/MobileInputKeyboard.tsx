@@ -29,9 +29,6 @@ const NON_TEXT_INPUT_TYPES = new Set([
   'week',
 ])
 
-const INTERACTIVE_SELECTOR =
-  'button, a, input, textarea, select, label, [role="button"], [role="option"], [role="tab"], [role="checkbox"], [role="switch"]'
-
 function asTextField(value: Element | null): TextField | null {
   if (value instanceof HTMLTextAreaElement) return value
   if (value instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(value.type)) return value
@@ -79,6 +76,20 @@ function labelFor(field: TextField): string {
   return field.placeholder?.trim() || 'Text'
 }
 
+function readCaret(field: TextField): { start: number; end: number } {
+  try {
+    const start = field.selectionStart
+    const end = field.selectionEnd
+    if (start === null || end === null) {
+      return { start: field.value.length, end: field.value.length }
+    }
+    return { start, end }
+  } catch {
+    // Number and email inputs do not expose a selection range.
+    return { start: field.value.length, end: field.value.length }
+  }
+}
+
 function setNativeValue(field: TextField, value: string) {
   const prototype =
     field instanceof HTMLTextAreaElement
@@ -109,8 +120,7 @@ function replaceRange(field: TextField, start: number, end: number, text: string
 }
 
 function insertText(field: TextField, text: string) {
-  const start = field.selectionStart ?? field.value.length
-  const end = field.selectionEnd ?? start
+  const { start, end } = readCaret(field)
   replaceRange(field, start, end, text)
 }
 
@@ -127,8 +137,7 @@ function dispatchKey(field: TextField, key: string): boolean {
 
 function deleteBackward(field: TextField) {
   if (field.disabled || field.readOnly) return
-  const start = field.selectionStart ?? field.value.length
-  const end = field.selectionEnd ?? start
+  const { start, end } = readCaret(field)
   if (start !== end) {
     replaceRange(field, start, end, '')
     return
@@ -144,8 +153,7 @@ function deleteBackward(field: TextField) {
 }
 
 function moveFieldCaret(field: TextField, delta: number) {
-  const start = field.selectionStart ?? 0
-  const end = field.selectionEnd ?? start
+  const { start, end } = readCaret(field)
   const next =
     start !== end
       ? delta < 0
@@ -182,8 +190,65 @@ export function MobileInputKeyboard() {
   const [height, setHeight] = useState(0)
   const activeRef = useRef<ActiveField | null>(null)
   const prepared = useRef(new Map<TextField, string | null>())
+  const caretRef = useRef<{ element: TextField; start: number; end: number } | null>(null)
   const blurTimer = useRef<number | null>(null)
   const nextKey = useRef(0)
+
+  const rememberCaret = useCallback((field: TextField) => {
+    const { start, end } = readCaret(field)
+    caretRef.current = { element: field, start, end }
+  }, [])
+
+  /**
+   * The native field can lose focus when a touch leaves it for the board.
+   * Restore the field, its saved selection, and (after React commits the
+   * controlled value) the caret again so typing continues in place.
+   */
+  const withActiveField = useCallback(
+    (action: (field: TextField) => void) => {
+      const current = activeRef.current
+      if (!current) return
+      const field = current.element
+      if (!field.isConnected) {
+        activeRef.current = null
+        setActive(null)
+        return
+      }
+
+      const remembered = caretRef.current?.element === field ? caretRef.current : null
+      if (document.activeElement !== field) field.focus({ preventScroll: true })
+      if (remembered) {
+        try {
+          field.setSelectionRange(remembered.start, remembered.end)
+        } catch {
+          // The value can still be edited without a selection range.
+        }
+      }
+
+      action(field)
+      const caret = readCaret(field)
+      rememberCaret(field)
+      window.requestAnimationFrame(() => {
+        if (!field.isConnected || activeRef.current?.element !== field) return
+        const focused = document.activeElement
+        const focusIsOurs =
+          focused === field ||
+          focused === document.body ||
+          focused === document.documentElement ||
+          focused === null ||
+          (focused instanceof Element && focused.closest('.osk') !== null)
+        if (!focusIsOurs) return
+        if (focused !== field) field.focus({ preventScroll: true })
+        try {
+          field.setSelectionRange(caret.start, caret.end)
+        } catch {
+          // Some input types do not expose a selection range.
+        }
+        rememberCaret(field)
+      })
+    },
+    [rememberCaret],
+  )
 
   const deactivate = useCallback((blur = false) => {
     const current = activeRef.current
@@ -207,7 +272,8 @@ export function MobileInputKeyboard() {
     }
     activeRef.current = next
     setActive(next)
-  }, [])
+    rememberCaret(field)
+  }, [rememberCaret])
 
   useEffect(() => {
     if (enabled) return
@@ -252,23 +318,33 @@ export function MobileInputKeyboard() {
 
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null
-      if (!target || target.closest('.osk')) return
+      if (!target) return
+      if (target.closest('.osk')) {
+        const current = activeRef.current
+        if (current) rememberCaret(current.element)
+        return
+      }
       const field = fieldFromTarget(target)
       if (field) {
         if (isEditableField(field)) prepare(field)
         return
       }
       if (!activeRef.current) return
-      if (target.closest(INTERACTIVE_SELECTOR)) return
-      // Tapping the page canvas should put the board away like a native one.
+      // Any tap outside the active field and its board dismisses the board.
+      // This is explicit so a lost focus event cannot do it by accident.
       window.setTimeout(() => {
         const current = activeRef.current
-        if (current && document.activeElement === current.element) current.element.blur()
+        if (!current) return
+        if (document.activeElement === current.element) current.element.blur()
+        deactivate()
       }, 0)
     }
 
     const onFocusIn = (event: FocusEvent) => {
       clearBlurTimer()
+      // Buttons and format controls inside the board can take focus without
+      // meaning the user left the field. Never tear the board down for those.
+      if (event.target instanceof Element && event.target.closest('.osk')) return
       const field = fieldFromTarget(event.target)
       if (!field || !isEditableField(field)) {
         deactivate()
@@ -276,10 +352,28 @@ export function MobileInputKeyboard() {
       }
       prepare(field)
       activate(field)
+      rememberCaret(field)
     }
 
-    const onFocusOut = () => {
+    const onSelectionChange = () => {
+      const current = activeRef.current
+      if (current && document.activeElement === current.element) rememberCaret(current.element)
+    }
+
+    const onFocusOut = (event: FocusEvent) => {
       clearBlurTimer()
+      const next = event.relatedTarget
+      if (next instanceof Element && next.closest('.osk')) return
+      // Touch browsers frequently drop focus to the document itself when a
+      // board key is tapped. That is not an exit; outside taps dismiss the
+      // board explicitly in onPointerDown.
+      if (
+        next === null ||
+        next === document.body ||
+        next === document.documentElement
+      ) {
+        return
+      }
       blurTimer.current = window.setTimeout(() => {
         const current = activeRef.current
         if (!current) return
@@ -297,6 +391,7 @@ export function MobileInputKeyboard() {
     document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('focusin', onFocusIn, true)
     document.addEventListener('focusout', onFocusOut, true)
+    document.addEventListener('selectionchange', onSelectionChange)
 
     const observer = new MutationObserver((records) => {
       const current = activeRef.current
@@ -316,6 +411,7 @@ export function MobileInputKeyboard() {
       document.removeEventListener('pointerdown', onPointerDown, true)
       document.removeEventListener('focusin', onFocusIn, true)
       document.removeEventListener('focusout', onFocusOut, true)
+      document.removeEventListener('selectionchange', onSelectionChange)
       observer.disconnect()
       clearBlurTimer()
       deactivate()
@@ -326,7 +422,7 @@ export function MobileInputKeyboard() {
       }
       originalModes.clear()
     }
-  }, [enabled, activate, deactivate])
+  }, [enabled, activate, deactivate, rememberCaret])
 
   useEffect(() => {
     if (!enabled || !active) return
@@ -360,10 +456,15 @@ export function MobileInputKeyboard() {
       key={active.key}
       label={active.label}
       initialMode={active.numeric ? 'numbers' : 'text'}
-      onInsert={(text) => insertText(active.element, text)}
-      onBackspace={() => deleteBackward(active.element)}
-      onReturn={() => pressReturn(active.element)}
-      onMoveCaret={(delta) => moveFieldCaret(active.element, delta)}
+      onInsert={(text) => withActiveField((field) => insertText(field, text))}
+      onBackspace={() => withActiveField(deleteBackward)}
+      onReturn={() => {
+        const field = activeRef.current?.element
+        if (!field) return
+        withActiveField(pressReturn)
+        if (!(field instanceof HTMLTextAreaElement)) deactivate(true)
+      }}
+      onMoveCaret={(delta) => withActiveField((field) => moveFieldCaret(field, delta))}
       onDismiss={() => deactivate(true)}
       onHeightChange={setHeight}
     />
