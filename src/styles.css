@@ -2427,6 +2427,470 @@ p {
   }
 }
 
+/* ---------- custom onscreen keyboard ---------- */
+
+.format-bar--keyboard {
+  position: static;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  animation: none;
+}
+
+.format-bar--keyboard .fmt-bar {
+  min-height: 38px;
+  padding: 2px 1px 3px;
+  scrollbar-width: none;
+}
+
+.format-bar--keyboard .fmt-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.format-bar--keyboard .fmt-btn,
+.format-bar--keyboard .fmt-select,
+.format-bar--keyboard .fmt-size {
+  height: 34px;
+}
+
+.format-bar--keyboard .fmt-btn {
+  flex-basis: 32px;
+  width: 32px;
+}
+
+.format-bar--keyboard .fmt-size__step {
+  height: 32px;
+}
+
+.format-bar--keyboard .fmt-swatch {
+  flex-basis: 22px;
+  width: 22px;
+  height: 22px;
+}
+
+.format-bar--keyboard .fmt-custom {
+  flex-basis: 23px;
+  width: 23px;
+  height: 23px;
+}
+
+.format-bar--keyboard .fmt-group--colors {
+  gap: 3px;
+}
+
+.fmt-size__value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 35px;
+  height: 20px;
+  padding: 0 5px;
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.osk {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  z-index: 95;
+  width: min(860px, 100%);
+  margin: 0;
+  padding: 0 8px calc(8px + env(safe-area-inset-bottom));
+  border: 1px solid var(--line-strong);
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  background: color-mix(in srgb, var(--bg-deep) 94%, var(--surface));
+  color: var(--ink);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 -22px 60px -30px rgba(23, 26, 23, 0.52);
+  transform: translateX(-50%);
+  animation: osk-in 0.2s var(--ease);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+@keyframes osk-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+
+.osk__format {
+  padding: 6px 2px 1px;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.osk__utility {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 31px;
+  padding: 2px 3px 0;
+}
+
+.osk__utility-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
+}
+
+.osk__util-btn {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 27px;
+  border-radius: 7px;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1;
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
+}
+
+.osk__util-btn:hover,
+.osk__util-btn:active {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.osk__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.09em;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.osk__hide {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  height: 27px;
+  padding: 0 8px 0 10px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.osk__hide:active {
+  background: var(--ink-soft);
+}
+
+.osk__keys {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0 1px;
+}
+
+.osk__row {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+  min-width: 0;
+}
+
+.osk__row--inset {
+  padding: 0 5.2%;
+}
+
+.osk__key {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 46px;
+  padding: 0;
+  border: 1px solid rgba(23, 26, 23, 0.11);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 0 var(--line-strong);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background 0.09s var(--ease),
+    transform 0.09s var(--ease),
+    box-shadow 0.09s var(--ease);
+}
+
+.osk__key:active {
+  background: var(--surface-2);
+  box-shadow: none;
+  transform: translateY(1px);
+}
+
+.osk__key--char {
+  font-size: 16.5px;
+  font-weight: 550;
+}
+
+.osk__char {
+  display: block;
+  transform: translateY(-0.5px);
+}
+
+.osk__hint {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  color: #a2a79e;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.osk__key--mod {
+  flex: 1.35 1 0;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.osk__key--mod.is-on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.osk__key--arrow {
+  flex: 0.78 1 0;
+  font-size: 15px;
+}
+
+.osk__key--emoji {
+  flex: 1.1 1 0;
+  font-size: 17px;
+}
+
+.osk__key--emoji.is-on {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.osk__key--space {
+  flex: 4.4 1 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  touch-action: none;
+}
+
+.osk__key--return {
+  flex: 1.2 1 0;
+  border-color: #e24a24;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 1px 0 #c93f1d;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.osk__key--return:active {
+  background: #e24a24;
+}
+
+.osk__emoji-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px 1px 1px;
+}
+
+.osk__emoji-tab {
+  flex: 1;
+  height: 30px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 16px;
+  transition: background 0.1s var(--ease);
+}
+
+.osk__emoji-tab.is-on {
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(23, 26, 23, 0.1);
+}
+
+.osk__emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
+  max-height: 188px;
+  padding: 7px 1px 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.osk__emoji {
+  display: grid;
+  place-items: center;
+  height: 38px;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 20px;
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.osk__emoji:active {
+  background: var(--surface-2);
+}
+
+.osk__preview {
+  position: fixed;
+  z-index: 121;
+  display: grid;
+  place-items: center;
+  height: 52px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--surface);
+  box-shadow: 0 8px 24px -10px rgba(23, 26, 23, 0.6);
+  font-size: 24px;
+  font-weight: 600;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 9px));
+}
+
+.note.has-keyboard .note__scroll {
+  padding-bottom: calc(var(--kb-height, 320px) + 30px + env(safe-area-inset-bottom));
+}
+
+.note.has-keyboard .block {
+  scroll-margin-bottom: calc(var(--kb-height, 320px) + 20px);
+}
+
+@media (min-width: 761px) {
+  .osk {
+    padding-right: 11px;
+    padding-left: 11px;
+  }
+
+  .osk__key {
+    height: 50px;
+    font-size: 17px;
+  }
+
+  .osk__row {
+    gap: 6px;
+  }
+
+  .osk__keys {
+    gap: 6px;
+  }
+
+  .osk__emoji {
+    height: 42px;
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 760px) {
+  .osk {
+    border-radius: 17px 17px 0 0;
+  }
+
+  .osk__label {
+    display: none;
+  }
+
+  .osk__emoji-grid {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 390px) {
+  .osk {
+    padding-right: 5px;
+    padding-left: 5px;
+  }
+
+  .osk__row,
+  .osk__keys {
+    gap: 4px;
+  }
+
+  .osk__key {
+    border-radius: 7px;
+    font-size: 15px;
+  }
+
+  .osk__key--char {
+    font-size: 15.5px;
+  }
+
+  .osk__util-btn {
+    width: 27px;
+  }
+}
+
+@media (max-height: 540px) {
+  .osk__key {
+    height: 38px;
+  }
+
+  .osk__key--char {
+    font-size: 14.5px;
+  }
+
+  .osk__utility {
+    height: 27px;
+  }
+
+  .osk__util-btn,
+  .osk__hide {
+    height: 24px;
+  }
+
+  .osk__emoji-grid {
+    max-height: 112px;
+  }
+
+  .osk__emoji {
+    height: 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .osk {
+    animation: none;
+  }
+}
+
 /* ---------- placeholder ---------- */
 
 .placeholder {

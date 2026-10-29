@@ -26,9 +26,14 @@ WebSocket sync server and the built client — so it deploys as a single Railway
 - Block editor: text, three heading levels, bulleted and numbered lists, to-dos, quotes, callouts,
   code and dividers.
 - **Format rail**: a single horizontal strip with block type, bold, italic, underline, strike,
-  custom font size, text colour, highlight, indentation and reset. It docks above the keyboard on
-  touch devices, becomes a floating popover on desktop, and scrolls sideways when space is tight.
-  Formatting is stored on the block, so it survives collaboration, duplication and templates.
+  custom font size, text colour, highlight, indentation and reset. It becomes a floating popover
+  on desktop, scrolls sideways when space is tight, and is stored on the block so it survives
+  collaboration, duplication and templates.
+- **Custom onscreen keyboard** on phones and tablets: the block editor hides the native keyboard
+  and opens a paper-themed board with the format rail docked at the top, shift/caps, numbers,
+  symbols, emoji, hold-to-delete, space-drag caret movement, undo/redo and a hide control. The real
+  textarea stays focused underneath, so selection, collaborative carets and hardware keyboards keep
+  working. Template blocks use the same board; short metadata fields keep the native keyboard.
 - Slash menu (`/`) for block types, markdown shortcuts (`# `, `- `, `[] `, `> `, ` ``` `), Tab to
   indent, Alt+↑/↓ to move a block, drag handle to reorder, undo/redo with `⌘Z`.
 - Every note belongs to a day. New notes start on today, and **Move** re-files one to another
@@ -142,6 +147,8 @@ src/
 - Table/database blocks (Notion-style properties and views) are **not** implemented yet.
 - Formatting applies to the active block, not a text selection; selection-level rich text is not
   exposed. Paste is plain text.
+- The custom onscreen keyboard covers note and template blocks. The note title, tags, account
+  fields and dialog inputs still use the device keyboard.
 - Presence shows each collaborator’s block caret and name tag; text selections are not highlighted.
 - Activity history begins with this build; edits made before it was running are not retroactively
   available. It versions the title and block content/formatting, not tags, stars or day moves.

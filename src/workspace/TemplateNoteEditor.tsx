@@ -4,6 +4,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
 } from 'react'
 import * as Y from 'yjs'
@@ -36,6 +37,8 @@ import {
   type FormatMode,
   type FormatPlacement,
 } from './FormatMenu'
+import { OnscreenKeyboard } from '../components/keyboard/OnscreenKeyboard'
+import { useBlockKeyboard } from './useBlockKeyboard'
 
 const NOOP = () => undefined
 
@@ -72,6 +75,11 @@ interface TemplateNoteEditorProps {
  */
 export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEditorProps) {
   const [doc] = useState(() => buildDoc(template))
+  const blockKeyboard = useBlockKeyboard()
+  const keyboardEnabled = blockKeyboard.enabled
+  const openKeyboard = blockKeyboard.open
+  const closeKeyboard = blockKeyboard.close
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
   const [, bump] = useReducer((value: number) => value + 1, 0)
   const [name, setName] = useState(template.name)
   const [title, setTitle] = useState(template.title)
@@ -123,6 +131,13 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
   const formatView = formatTarget
     ? (views.find((view) => view.id === formatTarget.blockId) ?? null)
     : null
+  const keyboardOpen =
+    keyboardEnabled &&
+    blockKeyboard.activeBlockId !== null &&
+    blockKeyboard.activeBlockId === activeBlockId &&
+    activeView !== null &&
+    activeView.type !== 'divider'
+  const keyboardFormatView = formatTarget?.mode === 'keyboard' ? formatView : null
 
   const orders: (number | null)[] = []
   const counters = [0, 0, 0, 0]
@@ -239,6 +254,12 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
   const openFormat = useCallback(
     (blockId: string, anchor: HTMLElement | null, placement: FormatPlacement) => {
       setSlash(null)
+      if (keyboardEnabled) {
+        openKeyboard(blockId)
+        setFormatTarget({ blockId, mode: 'keyboard', placement, anchor: null })
+        refocusBlock(blockId)
+        return
+      }
       setFormatTarget({
         blockId,
         mode: prefersTray() ? 'tray' : 'popover',
@@ -246,8 +267,54 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
         anchor: anchor ? anchorFor(anchor) : null,
       })
     },
-    [],
+    [keyboardEnabled, openKeyboard, refocusBlock],
   )
+
+  const dismissKeyboard = useCallback(() => {
+    closeKeyboard()
+    setKeyboardHeight(0)
+    setFormatTarget((current) => (current?.mode === 'keyboard' ? null : current))
+  }, [closeKeyboard])
+
+  const handleBlockFocus = useCallback(
+    (blockId: string | null) => {
+      if (!blockId) return
+      setActiveBlockId(blockId)
+      if (keyboardEnabled) {
+        openKeyboard(blockId)
+        setFormatTarget((current) =>
+          current?.blockId === blockId && current.mode === 'keyboard'
+            ? current
+            : { blockId, mode: 'keyboard', placement: 'block', anchor: null },
+        )
+      }
+    },
+    [keyboardEnabled, openKeyboard],
+  )
+
+  useEffect(() => {
+    if (!keyboardOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.osk')) return
+      if (target.closest('.note__body textarea')) return
+      dismissKeyboard()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [keyboardOpen, dismissKeyboard])
+
+  useEffect(() => {
+    if (!keyboardOpen || !blockKeyboard.activeBlockId || keyboardHeight <= 0) return
+    const frame = window.requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(
+        `[data-block-id="${blockKeyboard.activeBlockId}"]`,
+      )
+      row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [keyboardOpen, blockKeyboard.activeBlockId, keyboardHeight])
 
   const applyFormatType = (type: BlockType) => {
     if (!formatTarget) return
@@ -378,7 +445,12 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
   return (
     <section
       ref={surfaceRef}
-      className="note note--template"
+      className={`note note--template${keyboardOpen ? ' has-keyboard' : ''}`}
+      style={
+        keyboardOpen
+          ? ({ '--kb-height': `${keyboardHeight}px` } as CSSProperties)
+          : undefined
+      }
       aria-label="Template editor"
       onKeyDown={onUndoKeys}
     >
@@ -524,9 +596,9 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
               formatOpen={formatTarget !== null}
               onTyping={closeFormat}
               onEdited={NOOP}
-              onFocusBlock={(blockId) => {
-                if (blockId) setActiveBlockId(blockId)
-              }}
+              onFocusBlock={handleBlockFocus}
+              customKeyboard={keyboardEnabled}
+              registerKeyboard={blockKeyboard.register}
             />
           ))}
           <button
@@ -551,7 +623,7 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
         </footer>
       </div>
 
-      {formatTarget && formatView ? (
+      {formatTarget && formatView && formatTarget.mode !== 'keyboard' ? (
         <FormatMenu
           mode={formatTarget.mode}
           placement={formatTarget.placement}
@@ -564,6 +636,37 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
           onFormat={applyFormatStyle}
           onReset={resetFormatStyle}
           onClose={closeFormat}
+        />
+      ) : null}
+
+      {keyboardOpen ? (
+        <OnscreenKeyboard
+          label={activeView ? `${activeView.type} block` : 'Template'}
+          formatBar={
+            keyboardFormatView ? (
+              <FormatMenu
+                mode="keyboard"
+                placement={formatTarget?.placement ?? 'block'}
+                anchor={null}
+                type={keyboardFormatView.type}
+                indent={keyboardFormatView.indent}
+                format={keyboardFormatView.format}
+                onType={applyFormatType}
+                onIndent={changeFormatIndent}
+                onFormat={applyFormatStyle}
+                onReset={resetFormatStyle}
+                onClose={dismissKeyboard}
+              />
+            ) : undefined
+          }
+          onInsert={blockKeyboard.insert}
+          onBackspace={blockKeyboard.backspace}
+          onReturn={blockKeyboard.newline}
+          onMoveCaret={blockKeyboard.moveCaret}
+          onUndo={() => undoRef.current?.undo()}
+          onRedo={() => undoRef.current?.redo()}
+          onDismiss={dismissKeyboard}
+          onHeightChange={setKeyboardHeight}
         />
       ) : null}
 

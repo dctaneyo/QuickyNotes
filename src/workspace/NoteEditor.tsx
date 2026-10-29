@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
 import * as Y from 'yjs'
 import type { Member, NoteSummary, SyncState } from '../lib/types'
 import {
@@ -51,6 +58,8 @@ import { NoteHistoryView } from './NoteHistoryView'
 import { useNoteHistory } from '../hooks/useNoteHistory'
 import { ConnectionBadge } from '../components/ConnectionBadge'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { OnscreenKeyboard } from '../components/keyboard/OnscreenKeyboard'
+import { useBlockKeyboard } from './useBlockKeyboard'
 import {
   CalendarIcon,
   DotsIcon,
@@ -125,6 +134,11 @@ export function NoteEditor({
   autoFocus = false,
 }: NoteEditorProps) {
   const [, bump] = useReducer((value: number) => value + 1, 0)
+  const blockKeyboard = useBlockKeyboard()
+  const keyboardEnabled = blockKeyboard.enabled
+  const openKeyboard = blockKeyboard.open
+  const closeKeyboard = blockKeyboard.close
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null)
@@ -179,6 +193,15 @@ export function NoteEditor({
   const formatView = formatTarget
     ? (views.find((view) => view.id === formatTarget.blockId) ?? null)
     : null
+  const keyboardOpen =
+    keyboardEnabled &&
+    blockKeyboard.activeBlockId !== null &&
+    blockKeyboard.activeBlockId === activeBlockId &&
+    activeView !== null &&
+    activeView.type !== 'divider' &&
+    !readOnly &&
+    !historyOpen
+  const keyboardFormatView = formatTarget?.mode === 'keyboard' ? formatView : null
   const history = useNoteHistory(summary.id, token, historyEvents.subscribe, historyOpen)
   const activeHistoryId =
     historyEntryId != null && history.entries.some((entry) => entry.id === historyEntryId)
@@ -302,6 +325,12 @@ export function NoteEditor({
   const openFormat = useCallback(
     (blockId: string, anchor: HTMLElement | null, placement: FormatPlacement) => {
       setSlash(null)
+      if (keyboardEnabled) {
+        openKeyboard(blockId)
+        setFormatTarget({ blockId, mode: 'keyboard', placement, anchor: null })
+        refocusBlock(blockId)
+        return
+      }
       setFormatTarget({
         blockId,
         mode: prefersTray() ? 'tray' : 'popover',
@@ -309,8 +338,61 @@ export function NoteEditor({
         anchor: anchor ? anchorFor(anchor) : null,
       })
     },
-    [],
+    [keyboardEnabled, openKeyboard, refocusBlock],
   )
+
+  const dismissKeyboard = useCallback(() => {
+    closeKeyboard()
+    setKeyboardHeight(0)
+    setFormatTarget((current) => (current?.mode === 'keyboard' ? null : current))
+  }, [closeKeyboard])
+
+  const handleBlockFocus = useCallback(
+    (blockId: string | null, cursorIndex?: number) => {
+      if (blockId) {
+        setActiveBlockId(blockId)
+        if (keyboardEnabled) {
+          openKeyboard(blockId)
+          setFormatTarget((current) =>
+            current?.blockId === blockId && current.mode === 'keyboard'
+              ? current
+              : { blockId, mode: 'keyboard', placement: 'block', anchor: null },
+          )
+        }
+      }
+      setCursor(blockId, cursorIndex)
+    },
+    [keyboardEnabled, openKeyboard, setCursor],
+  )
+
+  useEffect(() => {
+    if (blockKeyboard.activeBlockId && (readOnly || historyOpen)) dismissKeyboard()
+  }, [readOnly, historyOpen, blockKeyboard.activeBlockId, dismissKeyboard])
+
+
+  useEffect(() => {
+    if (!keyboardOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.osk')) return
+      if (target.closest('.note__body textarea')) return
+      dismissKeyboard()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [keyboardOpen, dismissKeyboard])
+
+  useEffect(() => {
+    if (!keyboardOpen || !blockKeyboard.activeBlockId || keyboardHeight <= 0) return
+    const frame = window.requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(
+        `[data-block-id="${blockKeyboard.activeBlockId}"]`,
+      )
+      row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [keyboardOpen, blockKeyboard.activeBlockId, keyboardHeight])
 
   const applyFormatType = useCallback(
     (type: BlockType) => {
@@ -562,7 +644,15 @@ export function NoteEditor({
   }
 
   return (
-    <section className={`note${isTrashed ? ' is-trashed' : ''}`} aria-label="Note editor">
+    <section
+      className={`note${isTrashed ? ' is-trashed' : ''}${keyboardOpen ? ' has-keyboard' : ''}`}
+      style={
+        keyboardOpen
+          ? ({ '--kb-height': `${keyboardHeight}px` } as CSSProperties)
+          : undefined
+      }
+      aria-label="Note editor"
+    >
       <header className="note__bar">
         <button type="button" className="icon-btn note__back" onClick={onBack} aria-label="Back to notes">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -1087,10 +1177,9 @@ export function NoteEditor({
               formatOpen={formatTarget !== null}
               onTyping={closeFormat}
               onEdited={noop}
-              onFocusBlock={(blockId, cursorIndex) => {
-                if (blockId) setActiveBlockId(blockId)
-                setCursor(blockId, cursorIndex)
-              }}
+              onFocusBlock={handleBlockFocus}
+              customKeyboard={keyboardEnabled}
+              registerKeyboard={blockKeyboard.register}
             />
           ))}
           {!readOnly ? (
@@ -1154,7 +1243,7 @@ export function NoteEditor({
         }}
       />
 
-      {!readOnly && formatTarget && formatView ? (
+      {!readOnly && formatTarget && formatView && formatTarget.mode !== 'keyboard' ? (
         <FormatMenu
           mode={formatTarget.mode}
           placement={formatTarget.placement}
@@ -1167,6 +1256,37 @@ export function NoteEditor({
           onFormat={applyFormatStyle}
           onReset={resetFormatStyle}
           onClose={closeFormat}
+        />
+      ) : null}
+
+      {keyboardOpen ? (
+        <OnscreenKeyboard
+          label={activeView ? `${BLOCK_LABELS[activeView.type]} block` : 'Note'}
+          formatBar={
+            keyboardFormatView ? (
+              <FormatMenu
+                mode="keyboard"
+                placement={formatTarget?.placement ?? 'block'}
+                anchor={null}
+                type={keyboardFormatView.type}
+                indent={keyboardFormatView.indent}
+                format={keyboardFormatView.format}
+                onType={applyFormatType}
+                onIndent={changeFormatIndent}
+                onFormat={applyFormatStyle}
+                onReset={resetFormatStyle}
+                onClose={dismissKeyboard}
+              />
+            ) : undefined
+          }
+          onInsert={blockKeyboard.insert}
+          onBackspace={blockKeyboard.backspace}
+          onReturn={blockKeyboard.newline}
+          onMoveCaret={blockKeyboard.moveCaret}
+          onUndo={() => undoRef.current?.undo()}
+          onRedo={() => undoRef.current?.redo()}
+          onDismiss={dismissKeyboard}
+          onHeightChange={setKeyboardHeight}
         />
       ) : null}
 

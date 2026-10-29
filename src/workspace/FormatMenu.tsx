@@ -22,7 +22,7 @@ export interface FormatAnchor {
   bottom: number
 }
 
-export type FormatMode = 'tray' | 'popover'
+export type FormatMode = 'tray' | 'popover' | 'keyboard'
 export type FormatPlacement = 'header' | 'block'
 
 interface FormatMenuProps {
@@ -109,6 +109,8 @@ export function FormatMenu({
   }, [format.fontSize])
 
   useEffect(() => {
+    // The keyboard owns this rail: a key press must not dismiss it.
+    if (mode === 'keyboard') return
     const onPointerDown = (event: PointerEvent) => {
       if (menuRef.current?.contains(event.target as Node)) return
       onClose()
@@ -122,7 +124,7 @@ export function FormatMenu({
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [onClose])
+  }, [mode, onClose])
 
   // A desktop rail follows the block it belongs to. Scrolling the document
   // dismisses it, but scrolling the rail itself must not.
@@ -182,14 +184,16 @@ export function FormatMenu({
     }
   }, [mode, placement, anchor])
 
-  const style: CSSProperties =
+  const style: CSSProperties | undefined =
     mode === 'tray'
       ? ({ '--fmt-keyboard': `${keyboardInset + 10}px` } as CSSProperties)
-      : {
-          left: `${popover?.left ?? anchor?.left ?? EDGE}px`,
-          top: `${popover?.top ?? anchor?.top ?? EDGE}px`,
-          visibility: popover ? 'visible' : 'hidden',
-        }
+      : mode === 'keyboard'
+        ? undefined
+        : {
+            left: `${popover?.left ?? anchor?.left ?? EDGE}px`,
+            top: `${popover?.top ?? anchor?.top ?? EDGE}px`,
+            visibility: popover ? 'visible' : 'hidden',
+          }
 
   const effectiveSize = format.fontSize ?? clampFontSize(BLOCK_BASE_FONT_SIZE[type])
   const draftNumber = Number(sizeDraft)
@@ -217,13 +221,21 @@ export function FormatMenu({
   const customTextColor = format.color ?? '#171a17'
   const customHighlight = format.highlight ?? '#fff0a8'
 
-  return createPortal(
+  const bar = (
     <div
       ref={menuRef}
       className={`format-bar format-bar--${mode}`}
       style={style}
-      role="dialog"
+      role={mode === 'keyboard' ? 'group' : 'dialog'}
       aria-label={`Format ${BLOCK_LABELS[type]} block`}
+      onPointerDown={
+        mode === 'keyboard'
+          ? (event) => {
+              // Keep the caret in the block when a formatting button is pressed.
+              if ((event.target as HTMLElement).closest('button')) event.preventDefault()
+            }
+          : undefined
+      }
     >
       <div className="fmt-bar" role="toolbar" aria-label="Block formatting">
         <label className="fmt-select" title="Block type">
@@ -295,24 +307,30 @@ export function FormatMenu({
           >
             −
           </button>
-          <label className="fmt-size__field">
-            <input
-              value={sizeDraft}
-              inputMode="numeric"
-              maxLength={2}
-              placeholder="Auto"
-              aria-label="Font size in pixels"
-              title="Font size in pixels. Leave empty for automatic."
-              onChange={(event) => setSizeDraft(event.target.value.replace(/[^\d]/g, ''))}
-              onBlur={commitSize}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.currentTarget.blur()
-                }
-              }}
-            />
-            <span aria-hidden="true">px</span>
-          </label>
+          {mode === 'keyboard' ? (
+            <span className="fmt-size__value" aria-hidden="true">
+              {format.fontSize ? `${format.fontSize}px` : 'Auto'}
+            </span>
+          ) : (
+            <label className="fmt-size__field">
+              <input
+                value={sizeDraft}
+                inputMode="numeric"
+                maxLength={2}
+                placeholder="Auto"
+                aria-label="Font size in pixels"
+                title="Font size in pixels. Leave empty for automatic."
+                onChange={(event) => setSizeDraft(event.target.value.replace(/[^\d]/g, ''))}
+                onBlur={commitSize}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.currentTarget.blur()
+                  }
+                }}
+              />
+              <span aria-hidden="true">px</span>
+            </label>
+          )}
           <button
             type="button"
             className="fmt-size__step"
@@ -436,17 +454,21 @@ export function FormatMenu({
           <ResetFormatIcon size={16} />
         </button>
 
-        <button
-          type="button"
-          className="fmt-close"
-          onClick={onClose}
-          aria-label="Close format menu"
-          title="Close"
-        >
-          <XIcon size={15} />
-        </button>
+        {mode !== 'keyboard' ? (
+          <button
+            type="button"
+            className="fmt-close"
+            onClick={onClose}
+            aria-label="Close format menu"
+            title="Close"
+          >
+            <XIcon size={15} />
+          </button>
+        ) : null}
       </div>
-    </div>,
-    document.body,
+    </div>
   )
+
+  if (mode === 'keyboard') return bar
+  return createPortal(bar, document.body)
 }
