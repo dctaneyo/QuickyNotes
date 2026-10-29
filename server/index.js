@@ -5,7 +5,15 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer } from 'ws'
-import { db, countUsers, databasePath, getSetting, purgeExpiredSessions, setSetting } from './db.js'
+import {
+  db,
+  countUsers,
+  databasePath,
+  getSetting,
+  purgeExpiredSessions,
+  setSetting,
+  storage,
+} from './db.js'
 import {
   PIN_RE,
   USER_ID_RE,
@@ -992,6 +1000,12 @@ function adminStats() {
     uptime: Math.round(process.uptime()),
     signupsEnabled: signupsEnabled(),
     rooms: roomStats(),
+    storage: {
+      dataDir: storage.dataDir,
+      source: storage.source,
+      persistent: storage.onVolume,
+      onRailway: storage.onRailway,
+    },
   }
 }
 
@@ -1267,7 +1281,12 @@ app.post('/api/admin/users/:userId/id', requireAuth, requireAdmin, (req, res) =>
 // --------------------------------------------------------------- static ------
 
 app.get('/healthz', (req, res) => {
-  res.json({ ok: true, users: countUsers(), uptime: Math.round(process.uptime()) })
+  res.json({
+    ok: true,
+    users: countUsers(),
+    uptime: Math.round(process.uptime()),
+    storage: storage.onVolume ? 'volume' : 'ephemeral',
+  })
 })
 
 app.use('/api', (req, res) => {
@@ -1396,7 +1415,20 @@ setInterval(purgeExpiredTrash, TRASH_SWEEP_MS).unref()
 
 server.listen(PORT, HOST, () => {
   console.log(`[quicky] listening on ${HOST}:${PORT}`)
-  console.log(`[quicky] data directory: ${process.env.DATA_DIR || './data'}`)
+  console.log(`[quicky] data directory: ${storage.dataDir} (${storage.source})`)
+  console.log(`[quicky] database: ${storage.databasePath}`)
+  console.log(
+    `[quicky] persistence: ${
+      storage.onVolume
+        ? `Railway volume at ${storage.volumeMountPath}`
+        : 'container filesystem (not persistent across deploys)'
+    }`,
+  )
+  if (storage.onRailway && !storage.onVolume) {
+    console.warn(
+      '[quicky] WARNING: no Railway volume detected. Accounts and notes will be lost on the next deploy. Attach a volume to this service and restart.',
+    )
+  }
   console.log(`[quicky] signups: ${signupsEnabled() ? 'open' : 'closed'}`)
 })
 

@@ -514,6 +514,17 @@ export function AdminConsole({
                   </span>
                 </div>
                 <div className="admin-op">
+                  <span className="eyebrow">Storage</span>
+                  <strong>{stats.storage.persistent ? 'Persistent' : 'Ephemeral'}</strong>
+                  <span className="admin-op__sub">
+                    {stats.storage.persistent
+                      ? 'Railway volume'
+                      : stats.storage.onRailway
+                        ? 'lost on redeploy'
+                        : 'local disk'}
+                  </span>
+                </div>
+                <div className="admin-op">
                   <span className="eyebrow">Uptime</span>
                   <strong>{formatUptime(stats.uptime)}</strong>
                   <span className="admin-op__sub">since the last restart</span>

@@ -115,16 +115,28 @@ The first account you create is the admin. Local data lives in `./data` (git-ign
    build command (`npm run build`), the start command (`node server/index.js`) and the health check
    (`/healthz`). Nixpacks installs dependencies in its own install phase; do not add `npm ci` to
    the build command, because it collides with Nixpacks’ cached `node_modules/.cache`.
-2. **Add a volume** to the service and mount it at `/data`. Without a volume, SQLite is lost on
-   every redeploy.
-3. Set the service variable `DATA_DIR=/data`. `PORT` is injected by Railway and the server listens
-   on `0.0.0.0`.
-4. Optional: set `ALLOW_SIGNUP=false` after creating your account to close registration.
+2. **Attach a volume** to the service and mount it at `/data` (or `/app/data` if you prefer the
+   app's relative data folder). Railway injects `RAILWAY_VOLUME_MOUNT_PATH`, and the server uses
+   that path automatically; `DATA_DIR` is optional and only needed to choose a subdirectory inside
+   the volume. Without a volume, SQLite lives on the disposable container filesystem and every
+   redeploy loses accounts and notes.
+3. **Existing data is not copied into a newly attached volume.** Before attaching one, download a
+   backup from **Admin console → Download backup**. After the volume is mounted, stop the service,
+   upload the file with
+   `railway volume files upload ./quicky-notes-YYYY-MM-DD.sqlite /quicky-notes.sqlite` (the volume
+   root, so it lands at `/data/quicky-notes.sqlite`), then start the service. Never overwrite a
+   live SQLite database while the server is running.
+4. `PORT` is injected by Railway and the server listens on `0.0.0.0`. Optional: set
+   `ALLOW_SIGNUP=false` after creating your account to close registration.
 5. Deploy. WebSockets work on the same port and origin as the app, so there is nothing extra to
-   configure.
+   configure. The startup log confirms the database location, for example
+   `data directory: /data (RAILWAY_VOLUME_MOUNT_PATH)` and
+   `persistence: Railway volume at /data`. The Admin console's **Storage** card should say
+   **Persistent**; **Ephemeral** means no volume is attached.
 
 **Keep the service at one replica.** SQLite and the in-memory Yjs rooms assume a single process.
-Scale out only after moving to Postgres and a shared pub/sub layer. Back up `/data/quicky-notes.sqlite`.
+Scale out only after moving to Postgres and a shared pub/sub layer. Back up the volume's
+`quicky-notes.sqlite` with the Admin console or `railway volume files download`.
 
 ## Project layout
 

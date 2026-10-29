@@ -1,6 +1,8 @@
 # Railway deployment for Quicky Notes.
 # One service runs the API, the WebSocket server and the built client.
-# Attach a volume and set DATA_DIR to its mount path (for example /data).
+# Attach a Railway volume in the service settings. The server detects
+# RAILWAY_VOLUME_MOUNT_PATH automatically; DATA_DIR is optional. Mount the
+# volume at /data or /app/data so SQLite survives redeploys.
 
 [build]
 builder = "NIXPACKS"

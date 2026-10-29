@@ -28,6 +28,12 @@ export interface AdminStats {
     connections: number
     lobbyConnections: number
   }
+  storage: {
+    dataDir: string
+    source: string
+    persistent: boolean
+    onRailway: boolean
+  }
 }
 
 export interface AuditEntry {

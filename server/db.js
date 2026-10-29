@@ -2,13 +2,75 @@ import { DatabaseSync } from 'node:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
 
-// Railway mounts a persistent volume and we point DATA_DIR at it. Locally this
-// is just ./data, which is git-ignored.
-const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data')
-fs.mkdirSync(dataDir, { recursive: true })
+const cwd = process.cwd()
 
-export const databasePath =
-  process.env.DATABASE_PATH || path.join(dataDir, 'quicky-notes.sqlite')
+function resolveFromCwd(value) {
+  return path.isAbsolute(value) ? value : path.resolve(cwd, value)
+}
+
+function isInside(parent, child) {
+  const relative = path.relative(parent, child)
+  return (
+    relative === '' ||
+    (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  )
+}
+
+// Railway injects the actual volume path. Use it automatically so a missing or
+// stale DATA_DIR cannot silently put SQLite back on the disposable container
+// filesystem. DATA_DIR is still honoured when it points inside the volume.
+const explicitDatabasePath = process.env.DATABASE_PATH?.trim()
+const configuredDataDir = process.env.DATA_DIR?.trim()
+const volumeMountPath = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim()
+
+let dataDir
+let source
+if (explicitDatabasePath) {
+  dataDir = path.dirname(resolveFromCwd(explicitDatabasePath))
+  source = 'DATABASE_PATH'
+} else if (volumeMountPath) {
+  const volumePath = resolveFromCwd(volumeMountPath)
+  if (configuredDataDir && isInside(volumePath, resolveFromCwd(configuredDataDir))) {
+    dataDir = resolveFromCwd(configuredDataDir)
+    source = 'DATA_DIR inside the Railway volume'
+  } else {
+    dataDir = volumePath
+    source = 'RAILWAY_VOLUME_MOUNT_PATH'
+  }
+} else if (configuredDataDir) {
+  dataDir = resolveFromCwd(configuredDataDir)
+  source = 'DATA_DIR'
+} else {
+  dataDir = path.join(cwd, 'data')
+  source = 'local default'
+}
+
+try {
+  fs.mkdirSync(dataDir, { recursive: true })
+  fs.accessSync(dataDir, fs.constants.W_OK)
+} catch (error) {
+  console.error(`[quicky] cannot write to data directory ${dataDir}: ${error.message}`)
+  throw error
+}
+
+export const databasePath = explicitDatabasePath
+  ? resolveFromCwd(explicitDatabasePath)
+  : path.join(dataDir, 'quicky-notes.sqlite')
+
+export const storage = {
+  dataDir,
+  databasePath,
+  source,
+  volumeMountPath: volumeMountPath ? resolveFromCwd(volumeMountPath) : null,
+  onRailway: Boolean(
+    volumeMountPath ||
+      process.env.RAILWAY_ENVIRONMENT ||
+      process.env.RAILWAY_ENVIRONMENT_NAME ||
+      process.env.RAILWAY_SERVICE_ID ||
+      process.env.RAILWAY_PROJECT_ID,
+  ),
+  onVolume: Boolean(volumeMountPath && isInside(resolveFromCwd(volumeMountPath), databasePath)),
+}
 
 export const db = new DatabaseSync(databasePath)
 
