@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal } from '../components/Modal'
 import type { SessionUser } from '../lib/api'
+import { isIosDevice, isStandaloneApp } from '../lib/pwa'
 
 interface SettingsDialogProps {
   open: boolean
@@ -28,6 +29,8 @@ export function SettingsDialog({
   const [pinNote, setPinNote] = useState<string | null>(null)
   const [pinError, setPinError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const ios = isIosDevice()
+  const installed = isStandaloneApp()
 
   useEffect(() => {
     setName(user.displayName)
@@ -173,6 +176,59 @@ export function SettingsDialog({
           Change PIN
         </button>
       </section>
+
+      {ios ? (
+        <section className="settings__section">
+          <h3 className="settings__heading">Install on iPhone or iPad</h3>
+          {installed ? (
+            <p className="settings__install-ready" role="status">
+              <span className="settings__install-check" aria-hidden="true">
+                ✓
+              </span>
+              Quicky Notes is installed and opens full-screen from your Home Screen.
+            </p>
+          ) : (
+            <>
+              <div className="settings__install-app">
+                <img
+                  className="settings__install-icon"
+                  src="/icons/apple-touch-icon-180.png"
+                  alt=""
+                  width={44}
+                  height={44}
+                />
+                <div className="settings__install-copy">
+                  <strong>Quicky Notes</strong>
+                  <span>One tap from your Home Screen</span>
+                </div>
+              </div>
+              <ol className="settings__install-steps">
+                <li>
+                  <span className="settings__install-num">1</span>
+                  <span>
+                    Tap <strong>Share</strong> in your browser.
+                  </span>
+                </li>
+                <li>
+                  <span className="settings__install-num">2</span>
+                  <span>
+                    Choose <strong>Add to Home Screen</strong>.
+                  </span>
+                </li>
+                <li>
+                  <span className="settings__install-num">3</span>
+                  <span>
+                    Tap <strong>Add</strong>. It opens full-screen like an app.
+                  </span>
+                </li>
+              </ol>
+              <p className="muted settings__hint">
+                Don't see Add to Home Screen? Open this page in Safari first.
+              </p>
+            </>
+          )}
+        </section>
+      ) : null}
 
       <section className="settings__section settings__section--last">
         <button type="button" className="btn btn--ghost btn--full" onClick={() => void onSignOut()}>

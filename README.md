@@ -77,6 +77,18 @@ WebSocket sync server and the built client — so it deploys as a single Railway
   editor, bottom-sheet dialogs and a numpad sized for thumbs. No horizontal scrolling; inputs are
   16px to stop iOS zoom.
 
+**Install as an app**
+
+- A web manifest, Apple home-screen icons and a production app-shell service worker make Quicky
+  Notes installable. On iPhone or iPad, open the deployed site in Safari, tap **Share → Add to
+  Home Screen**, then **Add**. It launches full-screen without browser chrome and has its own icon.
+  Settings shows the same three steps on iOS and confirms when you are already in the installed app.
+- Android and desktop browsers can use their **Install app** action from the same manifest.
+- The worker caches only the app shell (HTML, hashed JS/CSS and icons) for offline launches. It
+  never handles `/api` or `/ws`, so notes, presence and realtime events keep their normal network
+  behaviour. Installation and offline shell caching require HTTPS (or localhost) and a production
+  build; `npm run dev` deliberately does not register the worker.
+
 ## Run it locally
 
 ```bash
@@ -149,6 +161,8 @@ src/
   exposed. Paste is plain text.
 - The custom onscreen keyboard covers note and template blocks. The note title, tags, account
   fields and dialog inputs still use the device keyboard.
+- The service worker caches the app shell only. A note opened for the first time still needs a
+  connection; notes already mirrored to IndexedDB open offline.
 - Presence shows each collaborator’s block caret and name tag; text selections are not highlighted.
 - Activity history begins with this build; edits made before it was running are not retroactively
   available. It versions the title and block content/formatting, not tags, stars or day moves.

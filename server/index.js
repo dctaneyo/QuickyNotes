@@ -1276,6 +1276,23 @@ app.use('/api', (req, res) => {
 
 const indexFile = path.join(DIST_DIR, 'index.html')
 if (fs.existsSync(indexFile)) {
+  // The manifest and worker must never be frozen by the one-year static cache.
+  const manifestFile = path.join(DIST_DIR, 'manifest.webmanifest')
+  const serviceWorkerFile = path.join(DIST_DIR, 'sw.js')
+  if (fs.existsSync(manifestFile)) {
+    app.get('/manifest.webmanifest', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache')
+      res.type('application/manifest+json').sendFile(manifestFile)
+    })
+  }
+  if (fs.existsSync(serviceWorkerFile)) {
+    app.get('/sw.js', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store')
+      res.setHeader('Service-Worker-Allowed', '/')
+      res.type('application/javascript').sendFile(serviceWorkerFile)
+    })
+  }
+
   // Read once: the single-page shell is served for every non-API route.
   const indexHtml = fs.readFileSync(indexFile, 'utf8')
   app.use(express.static(DIST_DIR, { index: false, maxAge: '1y' }))

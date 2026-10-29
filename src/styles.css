@@ -3484,6 +3484,108 @@ kbd {
   margin: -2px 0 10px;
 }
 
+.settings__install-app {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.settings__install-icon {
+  flex: 0 0 auto;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(23, 26, 23, 0.14);
+}
+
+.settings__install-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.settings__install-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings__install-copy span {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.settings__install-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings__install-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.settings__install-steps strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.settings__install-num {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.settings__install-steps + .settings__hint {
+  margin: 12px 0 0;
+}
+
+.settings__install-ready {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #cfeee1;
+  border-radius: var(--radius-sm);
+  background: #eaf7f1;
+  color: #0d7a5b;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.settings__install-check {
+  display: grid;
+  place-items: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .pin-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
