@@ -192,7 +192,7 @@ export function SettingsDialog({
               <div className="settings__install-app">
                 <img
                   className="settings__install-icon"
-                  src="/icons/apple-touch-icon-180.png?v=2"
+                  src="/app-icons/icon-180.png"
                   alt=""
                   width={44}
                   height={44}
