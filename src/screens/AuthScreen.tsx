@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DigitSlots, NumPad } from '../components/NumPad'
 import { useAuth } from '../auth/AuthContext'
-import { ApiError } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 
 type Mode = 'signin' | 'signup'
 type Step = 'id' | 'pin' | 'signup-pin' | 'signup-confirm' | 'issued'
 
 const ID_LENGTH = 8
 const PIN_LENGTH = 6
+const SIGNUPS_CLOSED_MESSAGE = "New accounts aren't being accepted at this time."
 
 export function AuthScreen() {
   const { signIn, signUp, enterWorkspace } = useAuth()
@@ -20,6 +21,8 @@ export function AuthScreen() {
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [signupsOpen, setSignupsOpen] = useState<boolean | null>(null)
+  const [checkingSignups, setCheckingSignups] = useState(false)
   const [retryIn, setRetryIn] = useState(0)
   const [issued, setIssued] = useState<{ userId: string; firstAccount: boolean } | null>(null)
   const [copied, setCopied] = useState(false)
@@ -30,6 +33,21 @@ export function AuthScreen() {
     const timer = window.setInterval(() => setRetryIn((value) => Math.max(0, value - 1)), 1000)
     return () => window.clearInterval(timer)
   }, [retryIn])
+
+  useEffect(() => {
+    let cancelled = false
+    api<{ enabled: boolean }>('/api/auth/signups')
+      .then((result) => {
+        if (!cancelled) setSignupsOpen(result.enabled)
+      })
+      .catch(() => {
+        // If the check fails, let the signup request itself answer.
+        if (!cancelled) setSignupsOpen(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(
     () => () => {
@@ -49,9 +67,44 @@ export function AuthScreen() {
     setRetryIn(0)
   }, [])
 
+  const openSignup = useCallback(async () => {
+    if (busy || checkingSignups) return
+    setError(null)
+    if (signupsOpen === false) {
+      setRetryIn(0)
+      setError(SIGNUPS_CLOSED_MESSAGE)
+      return
+    }
+    // Confirm with the server so a switch flipped after load is respected.
+    setCheckingSignups(true)
+    try {
+      const result = await api<{ enabled: boolean }>('/api/auth/signups')
+      setSignupsOpen(result.enabled)
+      if (!result.enabled) {
+        setMode('signin')
+        setStep('id')
+        setPin('')
+        setFirstPin('')
+        setConfirmPin('')
+        setRetryIn(0)
+        setError(SIGNUPS_CLOSED_MESSAGE)
+        return
+      }
+      resetFlow('signup')
+    } catch {
+      // Let the signup request itself report a closed server.
+      resetFlow('signup')
+    } finally {
+      setCheckingSignups(false)
+    }
+  }, [busy, checkingSignups, signupsOpen, resetFlow])
+
   const describeError = useCallback((caught: unknown) => {
     if (caught instanceof ApiError) {
       if (caught.status === 0) return "Can't reach the server. Check your connection and try again."
+      if (caught.status === 403 && /new accounts/i.test(caught.message)) {
+        return SIGNUPS_CLOSED_MESSAGE
+      }
       if (caught.retryAfter && caught.retryAfter > 0) setRetryIn(caught.retryAfter)
       if (caught.remaining !== undefined && caught.remaining > 0) {
         return `${caught.message} ${caught.remaining} ${caught.remaining === 1 ? 'try' : 'tries'} left.`
@@ -75,6 +128,13 @@ export function AuthScreen() {
   }, [pin, busy, signIn, userId, describeError])
 
   const finishSignup = useCallback(async () => {
+    if (signupsOpen === false) {
+      setMode('signin')
+      setStep('id')
+      setRetryIn(0)
+      setError(SIGNUPS_CLOSED_MESSAGE)
+      return
+    }
     if (confirmPin.length !== PIN_LENGTH || busy) return
     if (!displayName.trim()) {
       setError('Add a display name to continue.')
@@ -101,7 +161,7 @@ export function AuthScreen() {
     } finally {
       setBusy(false)
     }
-  }, [confirmPin, firstPin, busy, signUp, displayName, describeError])
+  }, [confirmPin, firstPin, busy, signUp, displayName, describeError, signupsOpen])
 
   const digitsForStep = step === 'id' || step === 'pin' || step === 'signup-pin' || step === 'signup-confirm'
   const currentValue =
@@ -136,6 +196,16 @@ export function AuthScreen() {
   }
 
   const handleSubmit = () => {
+    if ((step === 'signup-pin' || step === 'signup-confirm') && signupsOpen === false) {
+      setMode('signin')
+      setStep('id')
+      setPin('')
+      setFirstPin('')
+      setConfirmPin('')
+      setRetryIn(0)
+      setError(SIGNUPS_CLOSED_MESSAGE)
+      return
+    }
     if (step === 'id') {
       if (userId.length === ID_LENGTH) setStep('pin')
       return
@@ -266,7 +336,8 @@ export function AuthScreen() {
                   role="tab"
                   aria-selected={mode === 'signup'}
                   className={`auth__tab${mode === 'signup' ? ' is-active' : ''}`}
-                  onClick={() => resetFlow('signup')}
+                  onClick={() => void openSignup()}
+                  title={signupsOpen === false ? SIGNUPS_CLOSED_MESSAGE : undefined}
                 >
                   Create account
                 </button>

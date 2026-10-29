@@ -116,11 +116,17 @@ app.use('/api/auth', (req, res, next) => {
   next()
 })
 
+// Public: lets the login screen hide account creation when signups are closed.
+app.get('/api/auth/signups', (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  res.json({ enabled: signupsEnabled() })
+})
+
 app.post(
   '/api/auth/signup',
   route(async (req, res) => {
     if (!signupsEnabled()) {
-      res.status(403).json({ error: 'New accounts are closed on this server.' })
+      res.status(403).json({ error: "New accounts aren't being accepted at this time." })
       return
     }
     const pin = String(req.body?.pin ?? '')
