@@ -340,13 +340,16 @@ function cleanTemplateFormat(raw) {
     typeof raw.highlight === 'string' && /^#[0-9a-f]{6}$/i.test(raw.highlight)
       ? raw.highlight
       : null
-  const size = Math.round(Number(raw.fontSize))
+  const size = Number(raw.fontSize)
   return {
     bold: raw.bold === true,
     italic: raw.italic === true,
     underline: raw.underline === true,
     strike: raw.strike === true,
-    fontSize: Number.isFinite(size) ? Math.min(48, Math.max(11, size)) : null,
+    fontSize:
+      Number.isFinite(size) && size > 0
+        ? Math.min(48, Math.max(11, Math.round(size)))
+        : null,
     color,
     highlight,
   }
@@ -398,6 +401,46 @@ function listTemplatesForUser(userId) {
     .all(userId)
     .map(mapTemplate)
 }
+
+// Older saves rounded a default font size down to the 11px minimum. Repair
+// those rows once so notes created from saved templates keep natural sizes.
+function repairTemplateFontSizes() {
+  if (getSetting('template_font_size_repair') === '1') return
+  try {
+    const rows = db.prepare('SELECT id, blocks FROM templates').all()
+    const update = db.prepare('UPDATE templates SET blocks = ? WHERE id = ?')
+    let changed = 0
+    for (const row of rows) {
+      let blocks
+      try {
+        blocks = JSON.parse(row.blocks || '[]')
+      } catch {
+        continue
+      }
+      if (!Array.isArray(blocks)) continue
+      let touched = false
+      const next = blocks.map((block) => {
+        if (!block || typeof block !== 'object' || !block.format) return block
+        if (Number(block.format.fontSize) !== 11) return block
+        touched = true
+        return { ...block, format: { ...block.format, fontSize: null } }
+      })
+      if (!touched) continue
+      update.run(JSON.stringify(next), row.id)
+      changed += 1
+    }
+    setSetting('template_font_size_repair', '1')
+    if (changed > 0) {
+      console.log(
+        `[quicky] repaired font size in ${changed} template${changed === 1 ? '' : 's'}`,
+      )
+    }
+  } catch (error) {
+    console.error('[quicky] could not repair template font sizes', error.message)
+  }
+}
+
+repairTemplateFontSizes()
 
 function mapNote(row) {
   return {
