@@ -1,6 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { createPortal } from 'react-dom'
-import { ChevronDownIcon, HighlighterIcon, ResetFormatIcon, XIcon } from '../components/Icons'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { ChevronDownIcon, HighlighterIcon, ResetFormatIcon } from '../components/Icons'
 import { BLOCK_LABELS } from '../lib/notes'
 import {
   BLOCK_BASE_FONT_SIZE,
@@ -15,20 +14,10 @@ import {
 import type { BlockType } from '../lib/types'
 import { SLASH_ITEMS } from './SlashMenu'
 
-export interface FormatAnchor {
-  left: number
-  top: number
-  right: number
-  bottom: number
-}
-
-export type FormatMode = 'tray' | 'popover' | 'keyboard'
-export type FormatPlacement = 'header' | 'block'
+export type FormatMode = 'docked' | 'keyboard'
 
 interface FormatMenuProps {
   mode: FormatMode
-  placement: FormatPlacement
-  anchor: FormatAnchor | null
   type: BlockType
   indent: number
   format: BlockFormat
@@ -36,12 +25,10 @@ interface FormatMenuProps {
   onIndent: (delta: number) => void
   onFormat: (patch: Partial<BlockFormat>) => void
   onReset: () => void
-  onClose: () => void
 }
 
 // Dividers have no text to format, so they stay in the slash menu.
 const FORMAT_ITEMS = SLASH_ITEMS.filter((item) => item.type !== 'divider')
-const EDGE = 12
 
 const SHORT_LABELS: Partial<Record<BlockType, string>> = {
   text: 'Text',
@@ -56,40 +43,8 @@ const SHORT_LABELS: Partial<Record<BlockType, string>> = {
   code: 'Code',
 }
 
-/** Space between the visual viewport (above the keyboard) and the layout viewport. */
-function useKeyboardInset(active: boolean) {
-  const [inset, setInset] = useState(0)
-
-  useEffect(() => {
-    if (!active) return
-    const viewport = window.visualViewport
-    const update = () => {
-      const height = viewport?.height ?? window.innerHeight
-      const offsetTop = viewport?.offsetTop ?? 0
-      setInset(Math.max(0, Math.round(window.innerHeight - height - offsetTop)))
-    }
-    update()
-    viewport?.addEventListener('resize', update)
-    viewport?.addEventListener('scroll', update)
-    window.addEventListener('resize', update)
-    return () => {
-      viewport?.removeEventListener('resize', update)
-      viewport?.removeEventListener('scroll', update)
-      window.removeEventListener('resize', update)
-    }
-  }, [active])
-
-  return inset
-}
-
-function samePosition(a: { left: number; top: number } | null, b: { left: number; top: number }) {
-  return Boolean(a && Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5)
-}
-
 export function FormatMenu({
   mode,
-  placement,
-  anchor,
   type,
   indent,
   format,
@@ -97,103 +52,12 @@ export function FormatMenu({
   onIndent,
   onFormat,
   onReset,
-  onClose,
 }: FormatMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null)
-  const keyboardInset = useKeyboardInset(mode === 'tray')
-  const [popover, setPopover] = useState<{ left: number; top: number } | null>(null)
   const [sizeDraft, setSizeDraft] = useState(format.fontSize ? String(format.fontSize) : '')
 
   useEffect(() => {
     setSizeDraft(format.fontSize ? String(format.fontSize) : '')
   }, [format.fontSize])
-
-  useEffect(() => {
-    // The keyboard owns this rail: a key press must not dismiss it.
-    if (mode === 'keyboard') return
-    const onPointerDown = (event: PointerEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return
-      onClose()
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [mode, onClose])
-
-  // A desktop rail follows the block it belongs to. Scrolling the document
-  // dismisses it, but scrolling the rail itself must not.
-  useEffect(() => {
-    if (mode !== 'popover') return
-    const dismiss = (event: Event) => {
-      if (menuRef.current?.contains(event.target as Node)) return
-      onClose()
-    }
-    document.addEventListener('scroll', dismiss, true)
-    window.addEventListener('resize', dismiss)
-    return () => {
-      document.removeEventListener('scroll', dismiss, true)
-      window.removeEventListener('resize', dismiss)
-    }
-  }, [mode, onClose])
-
-  useLayoutEffect(() => {
-    if (mode !== 'popover' || !anchor) {
-      setPopover(null)
-      return
-    }
-    const element = menuRef.current
-    if (!element) return
-
-    const place = () => {
-      const width = element.offsetWidth
-      const height = element.offsetHeight
-      const viewportWidth = window.innerWidth
-      const viewportHeight = window.innerHeight
-      let left =
-        placement === 'header'
-          ? anchor.right - width
-          : anchor.left
-      left = Math.min(Math.max(left, EDGE), Math.max(EDGE, viewportWidth - width - EDGE))
-
-      let top: number
-      if (placement === 'header') {
-        top = anchor.bottom + 10
-        if (top + height > viewportHeight - EDGE) top = anchor.top - height - 10
-      } else {
-        top = anchor.top - height - 10
-        if (top < EDGE) top = anchor.bottom + 10
-      }
-      top = Math.min(Math.max(top, EDGE), Math.max(EDGE, viewportHeight - height - EDGE))
-      const next = { left, top }
-      setPopover((previous) => (samePosition(previous, next) ? previous : next))
-    }
-
-    place()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place)
-    observer?.observe(element)
-    window.addEventListener('resize', place)
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener('resize', place)
-    }
-  }, [mode, placement, anchor])
-
-  const style: CSSProperties | undefined =
-    mode === 'tray'
-      ? ({ '--fmt-keyboard': `${keyboardInset + 10}px` } as CSSProperties)
-      : mode === 'keyboard'
-        ? undefined
-        : {
-            left: `${popover?.left ?? anchor?.left ?? EDGE}px`,
-            top: `${popover?.top ?? anchor?.top ?? EDGE}px`,
-            visibility: popover ? 'visible' : 'hidden',
-          }
 
   const effectiveSize = format.fontSize ?? clampFontSize(BLOCK_BASE_FONT_SIZE[type])
   const draftNumber = Number(sizeDraft)
@@ -223,19 +87,13 @@ export function FormatMenu({
 
   const bar = (
     <div
-      ref={menuRef}
       className={`format-bar format-bar--${mode}`}
-      style={style}
-      role={mode === 'keyboard' ? 'group' : 'dialog'}
+      role={mode === 'keyboard' ? 'group' : 'region'}
       aria-label={`Format ${BLOCK_LABELS[type]} block`}
-      onPointerDown={
-        mode === 'keyboard'
-          ? (event) => {
-              // Keep the caret in the block when a formatting button is pressed.
-              if ((event.target as HTMLElement).closest('button')) event.preventDefault()
-            }
-          : undefined
-      }
+      onPointerDown={(event) => {
+        // Keep the caret in the block when a formatting button is pressed.
+        if ((event.target as HTMLElement).closest('button')) event.preventDefault()
+      }}
     >
       <div className="fmt-bar" role="toolbar" aria-label="Block formatting">
         <label className="fmt-select" title="Block type">
@@ -454,21 +312,9 @@ export function FormatMenu({
           <ResetFormatIcon size={16} />
         </button>
 
-        {mode !== 'keyboard' ? (
-          <button
-            type="button"
-            className="fmt-close"
-            onClick={onClose}
-            aria-label="Close format menu"
-            title="Close"
-          >
-            <XIcon size={15} />
-          </button>
-        ) : null}
       </div>
     </div>
   )
 
-  if (mode === 'keyboard') return bar
-  return createPortal(bar, document.body)
+  return bar
 }

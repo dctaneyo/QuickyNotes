@@ -1083,6 +1083,14 @@ p {
   padding: clamp(20px, 3.4vw, 42px) clamp(16px, 4vw, 56px) 80px;
 }
 
+.note__format-dock {
+  flex: 0 0 auto;
+  padding: 8px clamp(16px, 4vw, 56px) 10px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 97%, transparent);
+  backdrop-filter: blur(14px);
+}
+
 .note__title-wrap,
 .note__body,
 .note__footer {
@@ -1957,6 +1965,22 @@ p {
   position: fixed;
   z-index: 90;
   color: var(--ink);
+}
+
+.format-bar--docked {
+  position: static;
+  width: 100%;
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 5px;
+  border: 1px solid rgba(23, 26, 23, 0.1);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.format-bar--docked .fmt-bar {
+  min-height: 36px;
 }
 
 .format-bar--popover {

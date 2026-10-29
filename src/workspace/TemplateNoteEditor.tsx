@@ -31,25 +31,11 @@ import {
   type SlashState,
 } from './BlockRow'
 import { SlashMenu, filterSlash } from './SlashMenu'
-import {
-  FormatMenu,
-  type FormatAnchor,
-  type FormatMode,
-  type FormatPlacement,
-} from './FormatMenu'
+import { FormatMenu } from './FormatMenu'
 import { OnscreenKeyboard } from '../components/keyboard/OnscreenKeyboard'
 import { useBlockKeyboard } from './useBlockKeyboard'
 
 const NOOP = () => undefined
-
-function anchorFor(element: HTMLElement): FormatAnchor {
-  const rect = element.getBoundingClientRect()
-  return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
-}
-
-function prefersTray(): boolean {
-  return window.matchMedia('(max-width: 1024px), (any-pointer: coarse)').matches
-}
 
 function buildDoc(template: CustomTemplate): Y.Doc {
   const doc = new Y.Doc()
@@ -90,13 +76,12 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
   const [error, setError] = useState<string | null>(null)
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
-  const [activeBlockId, setActiveBlockId] = useState<string | null>(null)
-  const [formatTarget, setFormatTarget] = useState<{
-    blockId: string
-    mode: FormatMode
-    placement: FormatPlacement
-    anchor: FormatAnchor | null
-  } | null>(null)
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(() => {
+    const first = blockArray(doc)
+      .toArray()
+      .find((block) => blockView(block).type !== 'divider')
+    return first ? blockView(first).id : null
+  })
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
 
@@ -128,16 +113,12 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
 
   const views = blockViews(doc)
   const activeView = views.find((view) => view.id === activeBlockId) ?? null
-  const formatView = formatTarget
-    ? (views.find((view) => view.id === formatTarget.blockId) ?? null)
-    : null
   const keyboardOpen =
     keyboardEnabled &&
     blockKeyboard.activeBlockId !== null &&
     blockKeyboard.activeBlockId === activeBlockId &&
     activeView !== null &&
     activeView.type !== 'divider'
-  const keyboardFormatView = formatTarget?.mode === 'keyboard' ? formatView : null
 
   const orders: (number | null)[] = []
   const counters = [0, 0, 0, 0]
@@ -249,23 +230,12 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
     })
   }, [])
 
-  const closeFormat = useCallback(() => setFormatTarget(null), [])
-
   const openFormat = useCallback(
-    (blockId: string, anchor: HTMLElement | null, placement: FormatPlacement) => {
+    (blockId: string) => {
       setSlash(null)
-      if (keyboardEnabled) {
-        openKeyboard(blockId)
-        setFormatTarget({ blockId, mode: 'keyboard', placement, anchor: null })
-        refocusBlock(blockId)
-        return
-      }
-      setFormatTarget({
-        blockId,
-        mode: prefersTray() ? 'tray' : 'popover',
-        placement,
-        anchor: anchor ? anchorFor(anchor) : null,
-      })
+      setActiveBlockId(blockId)
+      if (keyboardEnabled) openKeyboard(blockId)
+      refocusBlock(blockId)
     },
     [keyboardEnabled, openKeyboard, refocusBlock],
   )
@@ -273,21 +243,13 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
   const dismissKeyboard = useCallback(() => {
     closeKeyboard()
     setKeyboardHeight(0)
-    setFormatTarget((current) => (current?.mode === 'keyboard' ? null : current))
   }, [closeKeyboard])
 
   const handleBlockFocus = useCallback(
     (blockId: string | null) => {
       if (!blockId) return
       setActiveBlockId(blockId)
-      if (keyboardEnabled) {
-        openKeyboard(blockId)
-        setFormatTarget((current) =>
-          current?.blockId === blockId && current.mode === 'keyboard'
-            ? current
-            : { blockId, mode: 'keyboard', placement: 'block', anchor: null },
-        )
-      }
+      if (keyboardEnabled) openKeyboard(blockId)
     },
     [keyboardEnabled, openKeyboard],
   )
@@ -317,49 +279,48 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
   }, [keyboardOpen, blockKeyboard.activeBlockId, keyboardHeight])
 
   const applyFormatType = (type: BlockType) => {
-    if (!formatTarget) return
+    if (!activeBlockId) return
     const target = blockArray(doc)
       .toArray()
-      .find((block) => blockView(block).id === formatTarget.blockId)
+      .find((block) => blockView(block).id === activeBlockId)
     if (!target) return
     doc.transact(() => {
       target.set('type', type)
       target.set('checked', false)
     })
-    setActiveBlockId(formatTarget.blockId)
-    refocusBlock(formatTarget.blockId)
+    refocusBlock(activeBlockId)
   }
 
   const changeFormatIndent = (delta: number) => {
-    if (!formatTarget) return
+    if (!activeBlockId) return
     const target = blockArray(doc)
       .toArray()
-      .find((block) => blockView(block).id === formatTarget.blockId)
+      .find((block) => blockView(block).id === activeBlockId)
     if (!target) return
     const current = Number(target.get('indent')) || 0
     const next = Math.min(3, Math.max(0, current + delta))
     if (next !== current) target.set('indent', next)
-    refocusBlock(formatTarget.blockId)
+    refocusBlock(activeBlockId)
   }
 
   const applyFormatStyle = (patch: Partial<BlockFormat>) => {
-    if (!formatTarget) return
+    if (!activeBlockId) return
     const target = blockArray(doc)
       .toArray()
-      .find((block) => blockView(block).id === formatTarget.blockId)
+      .find((block) => blockView(block).id === activeBlockId)
     if (!target) return
     doc.transact(() => applyBlockFormat(target, patch))
-    setActiveBlockId(formatTarget.blockId)
+    refocusBlock(activeBlockId)
   }
 
   const resetFormatStyle = () => {
-    if (!formatTarget) return
+    if (!activeBlockId) return
     const target = blockArray(doc)
       .toArray()
-      .find((block) => blockView(block).id === formatTarget.blockId)
+      .find((block) => blockView(block).id === activeBlockId)
     if (!target) return
     doc.transact(() => clearBlockFormat(target))
-    setActiveBlockId(formatTarget.blockId)
+    refocusBlock(activeBlockId)
   }
 
   const pickCommand = (type: BlockType) => {
@@ -391,13 +352,10 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
     move: (from, to) => moveBlock(doc, from, to),
     requestFocus,
     clearFocus: () => setFocusRequest(null),
-    setSlash: (next) => {
-      if (next) setFormatTarget(null)
-      setSlash(next)
-    },
+    setSlash: (next) => setSlash(next),
     slash,
     onPickCommand: pickCommand,
-    openFormat: (blockId, anchor) => openFormat(blockId, anchor, 'block'),
+    openFormat: (blockId) => openFormat(blockId),
     setDrag: setDragIndex,
     dragIndex,
     dropIndex,
@@ -511,33 +469,22 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
             {views.length} {views.length === 1 ? 'block' : 'blocks'} · edits autosave
           </span>
         </div>
-        <div className="note__bar-actions">
-          <button
-            type="button"
-            className="icon-btn note__format"
-            disabled={!activeView || activeView.type === 'divider'}
-            onClick={(event) => {
-              if (!activeView) return
-              openFormat(activeView.id, event.currentTarget, 'header')
-            }}
-            onMouseDown={(event) => event.preventDefault()}
-            aria-label={activeView ? `Format ${activeView.type} block` : 'Format block'}
-            aria-haspopup="dialog"
-            aria-expanded={Boolean(formatTarget && formatView)}
-            title={
-              activeView?.type === 'divider'
-                ? 'Dividers have no text to format'
-                : activeView
-                  ? 'Format this block'
-                  : 'Tap a block, then format it'
-            }
-          >
-            <span className="format-trigger" aria-hidden="true">
-              Aa
-            </span>
-          </button>
-        </div>
       </div>
+
+      {!keyboardEnabled && activeView && activeView.type !== 'divider' ? (
+        <div className="note__format-dock">
+          <FormatMenu
+            mode="docked"
+            type={activeView.type}
+            indent={activeView.indent}
+            format={activeView.format}
+            onType={applyFormatType}
+            onIndent={changeFormatIndent}
+            onFormat={applyFormatStyle}
+            onReset={resetFormatStyle}
+          />
+        </div>
+      ) : null}
 
       <div className="note__scroll">
         <div className="note__title-wrap">
@@ -593,8 +540,6 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
               focusRequest={focusRequest}
               remoteCursors={[]}
               api={api}
-              formatOpen={formatTarget !== null}
-              onTyping={closeFormat}
               onEdited={NOOP}
               onFocusBlock={handleBlockFocus}
               customKeyboard={keyboardEnabled}
@@ -623,39 +568,20 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
         </footer>
       </div>
 
-      {formatTarget && formatView && formatTarget.mode !== 'keyboard' ? (
-        <FormatMenu
-          mode={formatTarget.mode}
-          placement={formatTarget.placement}
-          anchor={formatTarget.anchor}
-          type={formatView.type}
-          indent={formatView.indent}
-          format={formatView.format}
-          onType={applyFormatType}
-          onIndent={changeFormatIndent}
-          onFormat={applyFormatStyle}
-          onReset={resetFormatStyle}
-          onClose={closeFormat}
-        />
-      ) : null}
-
       {keyboardOpen ? (
         <OnscreenKeyboard
           label={activeView ? `${activeView.type} block` : 'Template'}
           formatBar={
-            keyboardFormatView ? (
+            activeView ? (
               <FormatMenu
                 mode="keyboard"
-                placement={formatTarget?.placement ?? 'block'}
-                anchor={null}
-                type={keyboardFormatView.type}
-                indent={keyboardFormatView.indent}
-                format={keyboardFormatView.format}
+                type={activeView.type}
+                indent={activeView.indent}
+                format={activeView.format}
                 onType={applyFormatType}
                 onIndent={changeFormatIndent}
                 onFormat={applyFormatStyle}
                 onReset={resetFormatStyle}
-                onClose={dismissKeyboard}
               />
             ) : undefined
           }
