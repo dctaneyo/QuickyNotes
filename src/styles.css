@@ -2569,6 +2569,15 @@ p {
   color: var(--ink);
 }
 
+/* Undo and redo read as words, not glyphs, so they get their own width. */
+.osk__util-btn--text {
+  width: auto;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
 .osk__label {
   flex: 1;
   min-width: 0;
@@ -2709,11 +2718,6 @@ p {
   border-color: var(--ink);
   background: var(--ink);
   color: var(--surface);
-}
-
-.osk__key--arrow {
-  flex: 0.78 1 0;
-  font-size: 15px;
 }
 
 .osk__key--emoji {

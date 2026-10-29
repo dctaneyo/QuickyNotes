@@ -436,23 +436,22 @@ export function OnscreenKeyboard({
   )
 
   const utilityButton = (
-    glyph: string,
+    text: string,
     ariaLabel: string,
     action: () => void,
-    disabled = false,
+    variant = '',
   ) => (
     <button
       type="button"
-      className="osk__util-btn"
+      className={`osk__util-btn${variant ? ` osk__util-btn--${variant}` : ''}`}
       aria-label={ariaLabel}
       title={ariaLabel}
-      disabled={disabled}
       onPointerDown={(event) => {
         event.preventDefault()
-        if (!disabled) action()
+        action()
       }}
     >
-      {glyph}
+      {text}
     </button>
   )
 
@@ -486,10 +485,8 @@ export function OnscreenKeyboard({
 
         <div className="osk__utility">
           <div className="osk__utility-group">
-            {utilityButton('←', 'Move cursor left', () => onMoveCaret(-1))}
-            {utilityButton('→', 'Move cursor right', () => onMoveCaret(1))}
-            {onUndo ? utilityButton('↶', 'Undo', onUndo) : null}
-            {onRedo ? utilityButton('↷', 'Redo', onRedo) : null}
+            {onUndo ? utilityButton('Undo', 'Undo', onUndo, 'text') : null}
+            {onRedo ? utilityButton('Redo', 'Redo', onRedo, 'text') : null}
           </div>
           <span className="osk__label">{label}</span>
           <button
@@ -648,17 +645,6 @@ export function OnscreenKeyboard({
             </button>
             <button
               type="button"
-              className="osk__key osk__key--mod osk__key--arrow"
-              aria-label="Move cursor left"
-              onPointerDown={(event) => {
-                event.preventDefault()
-                onMoveCaret(-1)
-              }}
-            >
-              ←
-            </button>
-            <button
-              type="button"
               className="osk__key osk__key--space"
               aria-label="Space. Drag to move the cursor."
               onPointerDown={startSpaceDrag}
@@ -669,17 +655,6 @@ export function OnscreenKeyboard({
               }}
             >
               space
-            </button>
-            <button
-              type="button"
-              className="osk__key osk__key--mod osk__key--arrow"
-              aria-label="Move cursor right"
-              onPointerDown={(event) => {
-                event.preventDefault()
-                onMoveCaret(1)
-              }}
-            >
-              →
             </button>
             <button
               type="button"
