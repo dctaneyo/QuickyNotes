@@ -1361,6 +1361,21 @@ if (fs.existsSync(indexFile)) {
     })
   }
 
+  // iOS caches the auto-discovered root icons aggressively. Serve the legacy
+  // paths with no-cache and point new HTML at a versioned file instead.
+  const touchIconFile = path.join(DIST_DIR, 'apple-touch-icon.png')
+  const touchIconV3File = path.join(DIST_DIR, 'apple-touch-icon-v3.png')
+  if (fs.existsSync(touchIconFile) && fs.existsSync(touchIconV3File)) {
+    app.get(
+      ['/apple-touch-icon.png', '/apple-touch-icon-precomposed.png', '/apple-touch-icon-v3.png'],
+      (req, res) => {
+        const file = req.path === '/apple-touch-icon-v3.png' ? touchIconV3File : touchIconFile
+        res.setHeader('Cache-Control', 'no-cache')
+        res.type('image/png').sendFile(file)
+      },
+    )
+  }
+
   // Read once: the single-page shell is served for every non-API route.
   const indexHtml = fs.readFileSync(indexFile, 'utf8')
   app.use(express.static(DIST_DIR, { index: false, maxAge: '1y' }))

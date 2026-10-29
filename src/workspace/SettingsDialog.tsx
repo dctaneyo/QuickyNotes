@@ -192,7 +192,7 @@ export function SettingsDialog({
               <div className="settings__install-app">
                 <img
                   className="settings__install-icon"
-                  src="/app-icons/icon-180.png"
+                  src="/apple-touch-icon-v3.png"
                   alt=""
                   width={44}
                   height={44}
@@ -223,7 +223,8 @@ export function SettingsDialog({
                 </li>
               </ol>
               <p className="muted settings__hint">
-                Don't see Add to Home Screen? Open this page in Safari first.
+                Don't see Add to Home Screen? Open this page in Safari first. If an older shortcut
+                already exists, delete it before adding this one so iOS refreshes the icon.
               </p>
             </>
           )}

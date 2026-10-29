@@ -84,6 +84,8 @@ WebSocket sync server and the built client — so it deploys as a single Railway
   Notes installable. On iPhone or iPad, open the deployed site in Safari, tap **Share → Add to
   Home Screen**, then **Add**. It launches full-screen without browser chrome and has its own icon.
   Settings shows the same three steps on iOS and confirms when you are already in the installed app.
+  If an older shortcut already exists, delete it before adding the app again; iOS caches the Home
+  Screen icon per installed web app and does not replace it when the page's icon changes.
 - Android and desktop browsers can use their **Install app** action from the same manifest.
 - The worker caches only the app shell (HTML, hashed JS/CSS and icons) for offline launches. It
   never handles `/api` or `/ws`, so notes, presence and realtime events keep their normal network

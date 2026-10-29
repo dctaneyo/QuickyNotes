@@ -1,16 +1,7 @@
-const CACHE = 'quicky-shell-v4'
-const PRECACHE = [
-  '/manifest.webmanifest',
-  '/app-icons/favicon.svg',
-  '/app-icons/favicon-32.png',
-  '/app-icons/pwa/apple-touch-icon-180.png',
-  '/app-icons/pwa/apple-touch-icon-167.png',
-  '/app-icons/pwa/apple-touch-icon-152.png',
-  '/app-icons/pwa/icon-192.png',
-  '/app-icons/pwa/icon-512.png',
-  '/app-icons/pwa/icon-maskable-512.png',
-  '/apple-touch-icon.png',
-]
+const CACHE = 'quicky-shell-v5'
+// Icons and the manifest stay network-first: a cached icon can keep the old
+// Home Screen artwork even after the page itself has updated.
+const PRECACHE = []
 
 async function cacheResponse(cache, request, response) {
   if (response.ok) await cache.put(request, response)
@@ -88,6 +79,16 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
+  // Never serve an older icon or manifest from Cache Storage. iOS keeps its own
+  // Home Screen icon cache, so a stale response here makes the problem worse.
+  if (
+    url.pathname.startsWith('/app-icons/') ||
+    url.pathname.startsWith('/apple-touch-icon') ||
+    url.pathname === '/manifest.webmanifest'
+  ) {
+    return
+  }
+
   if (request.mode === 'navigate') {
     event.respondWith(
       (async () => {
@@ -115,7 +116,7 @@ self.addEventListener('fetch', (event) => {
 
   const isAsset =
     url.pathname.startsWith('/assets/') ||
-    /\.(?:css|js|png|svg|ico|webmanifest|woff2?)$/.test(url.pathname)
+    /\.(?:css|js|png|svg|ico|woff2?)$/.test(url.pathname)
   if (!isAsset) return
 
   event.respondWith(
