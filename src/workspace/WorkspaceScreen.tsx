@@ -36,8 +36,11 @@ const VIEW_TITLES: Record<ViewId, string> = {
   trash: 'Trash',
 }
 
-function isMobileViewport(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches
+function filtersMatch(a: Filter, b: Filter): boolean {
+  if (a.kind === 'view' && b.kind === 'view') return a.id === b.id
+  if (a.kind === 'day' && b.kind === 'day') return a.date === b.date
+  if (a.kind === 'tag' && b.kind === 'tag') return a.tag === b.tag
+  return false
 }
 
 export function WorkspaceScreen() {
@@ -65,6 +68,7 @@ export function WorkspaceScreen() {
 
   const notes = index.notes
   const selected = notes.find((note) => note.id === selectedId) ?? null
+  const viewingTrash = filter.kind === 'view' && filter.id === 'trash'
   const members = selected?.members ?? null
   const sync = useNoteSync(
     selected?.id ?? null,
@@ -97,6 +101,14 @@ export function WorkspaceScreen() {
       setSelectedId(null)
     }
   }, [notes, selectedId, index.syncing])
+
+  // A trashed note belongs only in the trash view, and a restored note no
+  // longer belongs there. Wait for the summary update so the change is saved
+  // before the editor unmounts.
+  useEffect(() => {
+    if (!selected) return
+    if (selected.trashed !== viewingTrash) setSelectedId(null)
+  }, [selected, viewingTrash])
 
   useEffect(() => {
     if (templateOpen) events.requestTemplates()
@@ -184,10 +196,11 @@ export function WorkspaceScreen() {
   }
 
   const changeFilter = (next: Filter) => {
+    const changed = !filtersMatch(filter, next)
     setFilter(next)
     setSearch('')
     setDrawerOpen(false)
-    if (isMobileViewport()) setSelectedId(null)
+    if (changed) setSelectedId(null)
   }
 
   const openSettings = () => {
@@ -479,7 +492,7 @@ export function WorkspaceScreen() {
         onEmptyTrash={() => setEmptyTrashOpen(true)}
         onOpenDrawer={() => setDrawerOpen(true)}
         syncing={index.syncing}
-        trashView={filter.kind === 'view' && filter.id === 'trash'}
+        trashView={viewingTrash}
         trashCount={counts.trash}
       />
 

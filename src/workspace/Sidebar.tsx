@@ -92,15 +92,6 @@ export function Sidebar({
       <div className="sidebar__section">
         <div className="sidebar__section-head">
           <span className="eyebrow">Calendar</span>
-          {selectedDay ? (
-            <button
-              type="button"
-              className="link link--tiny"
-              onClick={() => onFilter({ kind: 'view', id: 'today' })}
-            >
-              Clear
-            </button>
-          ) : null}
         </div>
         <Calendar
           selected={filter.kind === 'day' ? filter.date : selectedDay}
