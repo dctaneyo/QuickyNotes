@@ -663,6 +663,7 @@ export function WorkspaceScreen() {
             onSummaryChange={index.updateSummary}
             onSaveTemplate={saveTemplate}
             onShare={() => setShareOpen(true)}
+            onInvite={invite}
             onDeleteForever={() => requestDelete(selected.id)}
             onDuplicate={duplicateSelected}
             onBack={() => setSelectedId(null)}

@@ -79,22 +79,62 @@ export function effectiveTitle(note: Pick<NoteSummary, 'title' | 'text'>): strin
   return 'Untitled'
 }
 
-export function sortNotes(a: NoteSummary, b: NoteSummary): number {
-  if (a.starred !== b.starred) return a.starred ? -1 : 1
-  return b.updatedAt - a.updatedAt
+export interface NoteListEntry {
+  note: NoteSummary
+  depth: number
 }
 
-export function groupByDay(notes: NoteSummary[]): { day: string; notes: NoteSummary[] }[] {
-  const groups = new Map<string, NoteSummary[]>()
+export function sortNotes(a: NoteSummary, b: NoteSummary): number {
+  return b.createdAt - a.createdAt || b.updatedAt - a.updatedAt || a.id.localeCompare(b.id)
+}
+
+/**
+ * Build the sidebar tree. Top-level notes are newest-created first, and each
+ * page's subpages are nested beneath it in the same order.
+ */
+export function groupByDay(
+  notes: NoteSummary[],
+): { day: string; notes: NoteListEntry[] }[] {
+  const byId = new Map(notes.map((note) => [note.id, note]))
+  const children = new Map<string, NoteSummary[]>()
+  const roots: NoteSummary[] = []
+
   for (const note of notes) {
-    const day = noteDay(note)
-    const bucket = groups.get(day)
-    if (bucket) bucket.push(note)
-    else groups.set(day, [note])
+    if (note.parentId && note.parentId !== note.id && byId.has(note.parentId)) {
+      const siblings = children.get(note.parentId)
+      if (siblings) siblings.push(note)
+      else children.set(note.parentId, [note])
+    } else {
+      roots.push(note)
+    }
+  }
+  for (const siblings of children.values()) siblings.sort(sortNotes)
+  roots.sort(sortNotes)
+
+  const ordered: { note: NoteSummary; depth: number; day: string }[] = []
+  const seen = new Set<string>()
+  const visit = (note: NoteSummary, depth: number, day: string) => {
+    if (seen.has(note.id)) return
+    seen.add(note.id)
+    ordered.push({ note, depth, day })
+    for (const child of children.get(note.id) ?? []) visit(child, depth + 1, day)
+  }
+
+  for (const root of roots) visit(root, 0, noteDay(root))
+  // A malformed parent cycle has no root; still show every note exactly once.
+  for (const note of [...notes].sort(sortNotes)) {
+    if (!seen.has(note.id)) visit(note, 0, noteDay(note))
+  }
+
+  const groups = new Map<string, NoteListEntry[]>()
+  for (const entry of ordered) {
+    const bucket = groups.get(entry.day)
+    if (bucket) bucket.push({ note: entry.note, depth: entry.depth })
+    else groups.set(entry.day, [{ note: entry.note, depth: entry.depth }])
   }
   return [...groups.entries()]
     .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([day, items]) => ({ day, notes: items.sort(sortNotes) }))
+    .map(([day, items]) => ({ day, notes: items }))
 }
 
 const PRESENCE_COLORS = [

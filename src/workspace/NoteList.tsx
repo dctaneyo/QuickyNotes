@@ -187,16 +187,21 @@ export function NoteList({
               <h3 className="daygroup__label">{dayLabel(group.day)}</h3>
               <span className="daygroup__date mono">{formatDayShort(group.day)}</span>
             </header>
-            {group.notes.map((note) => (
+            {group.notes.map(({ note, depth }) => (
               <article
                 key={note.id}
+                style={depth > 0 ? { marginLeft: `${depth * 16}px` } : undefined}
                 className={`row${note.id === selectedId ? ' is-selected' : ''}${
                   note.trashed ? ' is-trashed' : ''
-                }${note.parentId ? ' is-child' : ''}`}
+                }${depth > 0 ? ' is-child' : ''}`}
               >
                 <button type="button" className="row__main" onClick={() => onSelect(note.id)}>
                   <span className="row__top">
-                    {note.parentId ? <span className="row__nest" aria-label="Subpage">↳</span> : null}
+                    {depth > 0 ? (
+                      <span className="row__nest" aria-label="Subpage">
+                        ↳
+                      </span>
+                    ) : null}
                     <span className="row__title">{effectiveTitle(note)}</span>
                     {note.starred ? (
                       <span className="row__star">

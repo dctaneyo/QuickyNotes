@@ -7,7 +7,7 @@ import {
   type CSSProperties,
 } from 'react'
 import * as Y from 'yjs'
-import type { Member, NoteSummary, SyncState } from '../lib/types'
+import type { Member, NoteSummary, Role, SyncState } from '../lib/types'
 import {
   BLOCK_LABELS,
   dateKey,
@@ -100,6 +100,7 @@ interface NoteEditorProps {
   onSummaryChange: (summary: NoteSummary) => void
   onSaveTemplate: (draft: TemplateDraft) => Promise<void>
   onShare: () => void
+  onInvite: (userId: string, role: Exclude<Role, 'owner'>) => Promise<void>
   onDeleteForever: () => void
   onDuplicate: () => void
   onBack: () => void
@@ -136,6 +137,7 @@ export function NoteEditor({
   onSummaryChange,
   onSaveTemplate,
   onShare,
+  onInvite,
   onDeleteForever,
   onDuplicate,
   onBack,
@@ -1424,10 +1426,12 @@ export function NoteEditor({
         members={members}
         currentUserId={currentUserId}
         isOwner={isOwner}
+        token={token}
         loading={comments.loading}
         error={comments.error}
         busy={comments.busy}
         onAdd={comments.add}
+        onInvite={onInvite}
         onResolve={comments.resolve}
         onDelete={comments.remove}
         onRefresh={comments.refresh}
