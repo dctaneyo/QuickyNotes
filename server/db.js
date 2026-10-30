@@ -115,8 +115,6 @@ db.exec(`
     public_token TEXT
   ) STRICT;
   CREATE INDEX IF NOT EXISTS notes_owner ON notes(owner_id);
-  CREATE UNIQUE INDEX IF NOT EXISTS notes_public_token
-    ON notes(public_token) WHERE public_token IS NOT NULL;
   CREATE INDEX IF NOT EXISTS notes_updated ON notes(updated_at DESC);
 
   CREATE TABLE IF NOT EXISTS note_members (
@@ -213,10 +211,12 @@ if (!noteColumns.includes('parent_id')) {
 }
 if (!noteColumns.includes('public_token')) {
   db.exec('ALTER TABLE notes ADD COLUMN public_token TEXT')
-  db.exec(
-    'CREATE UNIQUE INDEX IF NOT EXISTS notes_public_token ON notes(public_token) WHERE public_token IS NOT NULL',
-  )
 }
+// This index must follow the column migration: existing databases do not gain
+// columns from CREATE TABLE IF NOT EXISTS.
+db.exec(
+  'CREATE UNIQUE INDEX IF NOT EXISTS notes_public_token ON notes(public_token) WHERE public_token IS NOT NULL',
+)
 // Notes trashed before this column existed start their countdown from their
 // last edit, which is the closest honest estimate available.
 db.exec('UPDATE notes SET trashed_at = updated_at WHERE trashed = 1 AND trashed_at = 0')
