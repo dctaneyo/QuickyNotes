@@ -52,8 +52,10 @@ WebSocket sync server and the built client — so it deploys as a single Railway
 
 **Collaboration**
 
-- Invite people to a single note by their 8-digit ID; the owner can remove them, collaborators can
-  leave. Notes are private unless shared.
+- Invite people to a single note by their 8-digit ID as an editor or read-only viewer; the owner
+  can change roles or remove them, collaborators can leave. Notes are private unless shared.
+- Generate an optional public read-only link. Public visitors get the live note without an account
+  and cannot edit it; the owner can turn the link off at any time.
 - Text sync is a Yjs CRDT over a WebSocket per note, so two people can type in the same block
   without overwriting each other.
 - Presence: avatars in the note header and a coloured marker on the block someone is editing,
@@ -61,8 +63,15 @@ WebSocket sync server and the built client — so it deploys as a single Railway
 - A live connection badge (Synced / Reconnecting / Offline) in the note header.
 - **Note activity**: a clock button in the note header opens an inline timeline of who changed
   what and when. Selecting an entry shows the note at that point, with added text highlighted and
-  removed text struck through. Edits are batched per person and every update arrives over the
-  existing event WebSocket; there is no polling.
+  removed text struck through. Any earlier version can be restored after a confirmation. Edits are
+  batched per person and every update arrives over the existing event WebSocket; no polling.
+- **Comments and mentions**: discuss a note without changing its text. Commenters can mention
+  people on the note; mentions land in an account-wide inbox with an unread count.
+- **Pages and links**: notes can have nested subpages, link to other notes with `[[Note title]]`,
+  and show incoming backlinks automatically. A daily review collects today’s page, starred notes and
+  older notes worth revisiting.
+- **Import and export**: export one note as Markdown or JSON, export the whole workspace as a
+  portable archive, and import Markdown or Quicky JSON files as new notes.
 
 **Offline**
 
@@ -148,7 +157,7 @@ server/
   auth.js       scrypt PINs, sessions, lockout, admin helpers
   db.js         node:sqlite schema and migrations
   realtime.js   Yjs rooms, awareness, debounced persistence
-  history.js    batched, attributed note revisions and snapshots
+  history.js    batched, attributed revisions and historical snapshots
 src/
   auth/         session context
   screens/      numpad sign-in / create account
@@ -166,6 +175,7 @@ src/
 | `npm run dev:server`| API/WebSocket server only (watch mode)         |
 | `npm run dev:web`   | Vite only (expects the server on 8787)         |
 | `npm run build`     | Type-check and build the client into `dist/`   |
+| `npm test`          | Live API/WebSocket integration checks          |
 | `npm start`         | Serve API + WebSocket + `dist/` on `PORT`      |
 | `npm run lint`      | Oxlint                                         |
 
@@ -181,6 +191,7 @@ src/
 - Presence shows each collaborator’s block caret and name tag; text selections are not highlighted.
 - Activity history begins with this build; edits made before it was running are not retroactively
   available. It versions the title and block content/formatting, not tags, stars or day moves.
-- Attachments and comments are not built.
+- Comments are note-level, not inline block threads. Attachments and file uploads are not built.
+- A public link always shows the latest live note content and cannot be used to comment.
 - A 6-digit PIN is only 1,000,000 combinations: lockout, throttling and HTTPS are what make it
   acceptable. Add a second factor before exposing this publicly at scale.

@@ -192,10 +192,11 @@ export function NoteList({
                 key={note.id}
                 className={`row${note.id === selectedId ? ' is-selected' : ''}${
                   note.trashed ? ' is-trashed' : ''
-                }`}
+                }${note.parentId ? ' is-child' : ''}`}
               >
                 <button type="button" className="row__main" onClick={() => onSelect(note.id)}>
                   <span className="row__top">
+                    {note.parentId ? <span className="row__nest" aria-label="Subpage">↳</span> : null}
                     <span className="row__title">{effectiveTitle(note)}</span>
                     {note.starred ? (
                       <span className="row__star">

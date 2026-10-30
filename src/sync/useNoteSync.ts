@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
+import * as decoding from 'lib0/decoding'
 import { WebsocketProvider } from 'y-websocket'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { websocketBase } from '../lib/api'
@@ -15,6 +16,13 @@ export interface Peer {
   focus: string | null
   cursor: { blockId: string; index: number; at: number } | null
 }
+
+export type SaveState = 'saving' | 'saved' | 'error'
+
+// Private messages above the y-websocket protocol's 0-3 range.
+const MESSAGE_SAVED = 4
+const MESSAGE_SAVE_ERROR = 5
+const MESSAGE_LOADED = 6
 
 interface AwarenessShape {
   user?: { userId?: string; displayName?: string; color?: string }
@@ -32,10 +40,13 @@ export function useNoteSync(
   const [peers, setPeers] = useState<Peer[]>([])
   const [connected, setConnected] = useState(false)
   const [synced, setSynced] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>('saving')
+  const [savedAt, setSavedAt] = useState<number | null>(null)
   const [browserOnline, setBrowserOnline] = useState(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine,
   )
   const providerRef = useRef<WebsocketProvider | null>(null)
+  const pendingLocalRef = useRef(false)
   const cursorFrameRef = useRef<number | null>(null)
   const pendingCursorRef = useRef<{ blockId: string | null; index: number } | null>(null)
   const lastCursorRef = useRef<{ blockId: string; index: number } | null>(null)
@@ -58,8 +69,14 @@ export function useNoteSync(
       return
     }
 
+    setSaveState('saving')
+    setSavedAt(null)
+
     const nextDoc = new Y.Doc()
     const seed = takeSeed(noteId)
+    // A newly seeded note is not durable until the server acknowledges the
+    // first saved update, even though the note row itself already exists.
+    pendingLocalRef.current = Boolean(seed)
     if (seed) Y.applyUpdate(nextDoc, seed, 'seed')
 
     // Scoped by account so one person's local drafts never appear for another.
@@ -72,6 +89,32 @@ export function useNoteSync(
       displayName: displayName ?? userId,
       color: colorFor(userId),
     })
+
+    // The server sends a save acknowledgement only after SQLite commits. These
+    // private message types are outside y-websocket's own 0-3 range.
+    provider.messageHandlers[MESSAGE_SAVED] = (_encoder, decoder) => {
+      pendingLocalRef.current = false
+      setSavedAt(Number(decoding.readVarString(decoder)))
+      setSaveState('saved')
+    }
+    provider.messageHandlers[MESSAGE_SAVE_ERROR] = () => setSaveState('error')
+    provider.messageHandlers[MESSAGE_LOADED] = (_encoder, decoder) => {
+      const loadedAt = Number(decoding.readVarString(decoder))
+      // Do not claim a seed or a local edit was saved just because the server
+      // loaded its own copy. The save acknowledgement follows the commit.
+      if (pendingLocalRef.current) return
+      setSavedAt(loadedAt)
+      setSaveState('saved')
+    }
+
+    const onLocalUpdate = (_update: Uint8Array, origin: unknown) => {
+      // Ignore updates applied by the remote provider and IndexedDB hydration.
+      if (origin === provider || origin === persistence) return
+      pendingLocalRef.current = true
+      setSavedAt(null)
+      setSaveState('saving')
+    }
+    nextDoc.on('update', onLocalUpdate)
 
     setSynced(persistence.synced === true)
     persistence.on('synced', () => setSynced(true))
@@ -154,6 +197,7 @@ export function useNoteSync(
 
     return () => {
       provider.awareness.off('change', onAwareness)
+      nextDoc.off('update', onLocalUpdate)
       provider.destroy()
       persistence.destroy()
       if (cursorFrameRef.current !== null) {
@@ -239,5 +283,15 @@ export function useNoteSync(
 
   const status: SyncState = !browserOnline ? 'offline' : connected ? 'online' : 'connecting'
 
-  return { doc, peers, status, synced, setCursor, retry, browserOnline }
+  return {
+    doc,
+    peers,
+    status,
+    synced,
+    saveState,
+    savedAt,
+    setCursor,
+    retry,
+    browserOnline,
+  }
 }

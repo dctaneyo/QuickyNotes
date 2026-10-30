@@ -20,6 +20,8 @@ interface NoteHistoryViewProps {
   onSelect: (id: number) => void
   onClose: () => void
   onRefresh: () => void
+  onRestore: () => void
+  canRestore: boolean
 }
 
 interface RenderItem {
@@ -277,6 +279,8 @@ export function NoteHistoryView({
   onSelect,
   onClose,
   onRefresh,
+  onRestore,
+  canRestore,
 }: NoteHistoryViewProps) {
   const selectedIndex =
     selectedId == null ? 0 : Math.max(0, entries.findIndex((entry) => entry.id === selectedId))
@@ -423,6 +427,15 @@ export function NoteHistoryView({
                   <mark className="hist-ins">added</mark>
                   <del className="hist-del">removed</del>
                 </span>
+                {canRestore ? (
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm history__restore"
+                    onClick={onRestore}
+                  >
+                    Restore this version
+                  </button>
+                ) : null}
               </div>
 
               <div className="history__title-wrap">

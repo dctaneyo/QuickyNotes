@@ -13,7 +13,7 @@ export type BlockType =
   | 'callout'
   | 'divider'
 
-export type Role = 'owner' | 'editor'
+export type Role = 'owner' | 'editor' | 'viewer'
 
 export interface NoteSummary {
   id: string
@@ -37,6 +37,10 @@ export interface NoteSummary {
   text: string
   /** Pushed with the note list so the share dialog is live too. */
   members?: Member[]
+  /** Parent page for nested notes. */
+  parentId?: string | null
+  /** Public read-only link token. Only returned to the owner. */
+  publicToken?: string | null
   /** Created on this device and not yet registered with the server. */
   pending?: boolean
 }
@@ -79,4 +83,26 @@ export interface NoteHistoryEntry {
   actorName: string
   createdAt: number
   changes: NoteHistoryChange[]
+}
+
+export interface NoteComment {
+  id: string
+  noteId: string
+  authorId: string
+  authorName: string
+  body: string
+  resolvedAt: number
+  createdAt: number
+  mentions: { userId: string; displayName: string }[]
+}
+
+export interface MentionItem {
+  id: string
+  noteId: string
+  noteTitle: string
+  authorId: string
+  authorName: string
+  body: string
+  createdAt: number
+  readAt: number
 }

@@ -182,6 +182,24 @@ export function ResetFormatIcon(props: IconProps) {
   )
 }
 
+export function CommentIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 5.2h16v11H9.5L5 20v-3.8H4z" />
+      <path d="M8 9h8M8 12.4h5.5" />
+    </Svg>
+  )
+}
+
+export function MentionIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M16 8.5v4.2a2.8 2.8 0 0 0 5.6 0V12a9.6 9.6 0 1 0-3.8 7.7" />
+    </Svg>
+  )
+}
+
 export function ArrowLeftIcon(props: IconProps) {
   return (
     <Svg {...props}>

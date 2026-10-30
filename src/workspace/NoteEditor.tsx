@@ -12,6 +12,7 @@ import {
   BLOCK_LABELS,
   dateKey,
   dayLabel,
+  effectiveTitle,
   formatDayShort,
   formatTime,
   initials,
@@ -33,7 +34,7 @@ import {
   plainText,
 } from '../sync/noteModel'
 import type { BlockFormat } from '../lib/formatting'
-import type { Peer } from '../sync/useNoteSync'
+import type { Peer, SaveState } from '../sync/useNoteSync'
 import type { Realtime } from '../sync/useEvents'
 import { SUGGESTED_TAGS } from '../lib/tags'
 import type { TemplateDraft } from '../lib/templates'
@@ -50,13 +51,18 @@ import { Calendar } from './Calendar'
 import { SaveTemplateDialog } from './SaveTemplateDialog'
 import { LockNoteDialog, UnlockNoteDialog } from './NoteLockDialog'
 import { NoteHistoryView } from './NoteHistoryView'
+import { CommentsPanel } from './CommentsPanel'
 import { useNoteHistory } from '../hooks/useNoteHistory'
+import { useComments } from '../hooks/useComments'
+import { api as apiRequest } from '../lib/api'
+import { Modal } from '../components/Modal'
 import { ConnectionBadge } from '../components/ConnectionBadge'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { OnscreenKeyboard } from '../components/keyboard/OnscreenKeyboard'
 import { useBlockKeyboard } from './useBlockKeyboard'
 import {
   CalendarIcon,
+  CommentIcon,
   DotsIcon,
   HistoryIcon,
   LockIcon,
@@ -67,7 +73,6 @@ import {
 } from '../components/Icons'
 import type { BlockType } from '../lib/types'
 
-const noop = () => undefined
 const NO_MARKERS = new Set<string>()
 
 interface NoteEditorProps {
@@ -76,12 +81,22 @@ interface NoteEditorProps {
   peers: Peer[]
   status: SyncState
   synced: boolean
+  saveState: SaveState
+  savedAt: number | null
   setCursor: (blockId: string | null, index?: number) => void
   retry: () => void
   members: Member[] | null
   token: string | null
   historyEvents: Realtime
   tagSuggestions?: string[]
+  backlinks: NoteSummary[]
+  outboundLinks: NoteSummary[]
+  linkTargets: NoteSummary[]
+  parentTitle: string | null
+  subpages: NoteSummary[]
+  currentUserId: string
+  onOpenNote: (id: string) => void
+  onCreateSubpage: () => void
   onSummaryChange: (summary: NoteSummary) => void
   onSaveTemplate: (draft: TemplateDraft) => Promise<void>
   onShare: () => void
@@ -92,6 +107,7 @@ interface NoteEditorProps {
   onLock: (password: string | null) => Promise<void>
   onUnlock: (password: string | null) => Promise<void>
   onRemoveLock: () => Promise<void>
+  onReleaseUnlock: () => Promise<void>
   autoFocus?: boolean
 }
 
@@ -101,12 +117,22 @@ export function NoteEditor({
   peers,
   status,
   synced,
+  saveState,
+  savedAt,
   setCursor,
   retry,
   members,
   token,
   historyEvents,
   tagSuggestions = [],
+  backlinks,
+  outboundLinks,
+  linkTargets,
+  parentTitle,
+  subpages,
+  currentUserId,
+  onOpenNote,
+  onCreateSubpage,
   onSummaryChange,
   onSaveTemplate,
   onShare,
@@ -117,6 +143,7 @@ export function NoteEditor({
   onLock,
   onUnlock,
   onRemoveLock,
+  onReleaseUnlock,
   autoFocus = false,
 }: NoteEditorProps) {
   const [, bump] = useReducer((value: number) => value + 1, 0)
@@ -143,6 +170,10 @@ export function NoteEditor({
   const [removeLockOpen, setRemoveLockOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyEntryId, setHistoryEntryId] = useState<number | null>(null)
+  const [historyRestoreOpen, setHistoryRestoreOpen] = useState(false)
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkQuery, setLinkQuery] = useState('')
   // A visit-only grant: switching notes or refreshing re-locks the note.
   const [unlocked, setUnlocked] = useState(false)
   const [moving, setMoving] = useState(false)
@@ -157,13 +188,18 @@ export function NoteEditor({
   summaryRef.current = summary
   const summaryChangeRef = useRef(onSummaryChange)
   summaryChangeRef.current = onSummaryChange
+  const releaseUnlockRef = useRef(onReleaseUnlock)
+  releaseUnlockRef.current = onReleaseUnlock
 
   const meta = noteMeta(doc)
   const isTrashed = meta.trashed
   const isLocked = summary.locked === true
   const lockProtected = summary.lockProtected === true
   const isOwner = summary.role === 'owner'
-  const readOnly = isTrashed || (isLocked && !unlocked)
+  const isViewer = summary.role === 'viewer'
+  const readOnly = isTrashed || isViewer || (isLocked && !unlocked)
+  const canComment = !isTrashed
+  const wasLockedRef = useRef(isLocked)
   const noteDate = meta.due ?? dateKey(new Date(meta.createdAt))
   const dayName = dayLabel(noteDate)
   const dayStamp = formatDayShort(noteDate)
@@ -184,6 +220,7 @@ export function NoteEditor({
     !readOnly &&
     !historyOpen
   const history = useNoteHistory(summary.id, token, historyEvents.subscribe, historyOpen)
+  const comments = useComments(summary.id, token, historyEvents.subscribe, commentsOpen)
   const activeHistoryId =
     historyEntryId != null && history.entries.some((entry) => entry.id === historyEntryId)
       ? historyEntryId
@@ -286,9 +323,37 @@ export function NoteEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFocus, doc])
 
+  // A lock set by another client must immediately remove this visit's grant.
+  useEffect(() => {
+    if (isLocked && !wasLockedRef.current) setUnlocked(false)
+    wasLockedRef.current = isLocked
+  }, [isLocked])
+
+  // Unlock grants are per visit. Release this session's grant when the editor
+  // closes; the server closes the note socket too, so a stale tab cannot keep
+  // writing to a note the user has left.
+  useEffect(() => () => {
+    void releaseUnlockRef.current().catch(() => undefined)
+  }, [])
+
   const requestFocus = useCallback((blockId: string, at: 'start' | 'end') => {
     setFocusRequest({ blockId, at, nonce: Date.now() })
   }, [])
+
+  const touchNote = useCallback(() => {
+    // Timestamp refreshes use a separate origin so they do not become their
+    // own undo step. The body transaction itself remains undoable normally.
+    const metaMap = doc.getMap('meta')
+    doc.transact(() => metaMap.set('updatedAt', Date.now()), 'timestamp')
+  }, [doc])
+
+  const undoNote = useCallback(() => {
+    if (undoRef.current?.undo()) touchNote()
+  }, [touchNote])
+
+  const redoNote = useCallback(() => {
+    if (undoRef.current?.redo()) touchNote()
+  }, [touchNote])
 
   // Formatting is done from buttons outside the textarea. Put the caret back
   // where it was so a format choice never ends the editing session.
@@ -367,9 +432,10 @@ export function NoteEditor({
         target.set('type', type)
         target.set('checked', false)
       })
+      touchNote()
       refocusBlock(activeBlockId)
     },
-    [doc, activeBlockId, refocusBlock],
+    [doc, activeBlockId, refocusBlock, touchNote],
   )
 
   const changeFormatIndent = useCallback(
@@ -381,10 +447,13 @@ export function NoteEditor({
       if (!target) return
       const current = Number(target.get('indent')) || 0
       const next = Math.min(3, Math.max(0, current + delta))
-      if (next !== current) target.set('indent', next)
+      if (next !== current) {
+        target.set('indent', next)
+        touchNote()
+      }
       refocusBlock(activeBlockId)
     },
-    [doc, activeBlockId, refocusBlock],
+    [doc, activeBlockId, refocusBlock, touchNote],
   )
 
   // Style changes stay on the block, so the collaborative caret geometry and
@@ -397,10 +466,11 @@ export function NoteEditor({
         .find((block) => blockView(block).id === activeBlockId)
       if (!target) return
       doc.transact(() => applyBlockFormat(target, patch))
+      touchNote()
       refocusBlock(activeBlockId)
       bump()
     },
-    [doc, activeBlockId, refocusBlock],
+    [doc, activeBlockId, refocusBlock, touchNote],
   )
 
   const resetFormatStyle = useCallback(() => {
@@ -410,9 +480,10 @@ export function NoteEditor({
       .find((block) => blockView(block).id === activeBlockId)
     if (!target) return
     doc.transact(() => clearBlockFormat(target))
+    touchNote()
     refocusBlock(activeBlockId)
     bump()
-  }, [doc, activeBlockId, refocusBlock])
+  }, [doc, activeBlockId, refocusBlock, touchNote])
 
   const pickCommand = useCallback(
     (type: BlockType) => {
@@ -425,16 +496,18 @@ export function NoteEditor({
       text.delete(0, text.length)
       target.set('type', type)
       target.set('checked', false)
+      touchNote()
       const id = blockView(target).id
       setSlash(null)
       window.requestAnimationFrame(() => requestFocus(id, 'start'))
     },
-    [doc, slash, requestFocus],
+    [doc, slash, requestFocus, touchNote],
   )
 
   const api: BlockRowApi = {
     insertAfter: (index, seed) => {
       const block = createBlock(doc, index + 1, seed)
+      touchNote()
       return blockView(block).id
     },
     remove: (index) => {
@@ -442,11 +515,15 @@ export function NoteEditor({
       const fallback = blocks.length > 1 ? blocks.get(Math.max(0, index - 1)) : null
       const fallbackId = fallback ? blockView(fallback).id : null
       deleteBlock(doc, index)
+      touchNote()
       if (fallbackId) {
         window.requestAnimationFrame(() => requestFocus(fallbackId, 'end'))
       }
     },
-    move: (from, to) => moveBlock(doc, from, to),
+    move: (from, to) => {
+      moveBlock(doc, from, to)
+      touchNote()
+    },
     requestFocus,
     clearFocus: () => setFocusRequest(null),
     setSlash: (next) => setSlash(next),
@@ -461,6 +538,7 @@ export function NoteEditor({
       if (dragIndex === null) return
       const target = dragIndex < index ? index - 1 : index
       moveBlock(doc, dragIndex, target)
+      touchNote()
       setDragIndex(null)
       setDropIndex(null)
     },
@@ -557,6 +635,7 @@ export function NoteEditor({
         blocks.delete(targets[index], 1)
       }
     })
+    touchNote()
     onToast(`Removed ${targets.length} blank ${targets.length === 1 ? 'line' : 'lines'}`)
   }
 
@@ -568,8 +647,11 @@ export function NoteEditor({
     const manager = undoRef.current
     if (!manager) return
     event.preventDefault()
-    if (key === 'y' || event.shiftKey) manager.redo()
-    else manager.undo()
+    if (key === 'y' || event.shiftKey) {
+      if (manager.redo()) touchNote()
+    } else if (manager.undo()) {
+      touchNote()
+    }
   }
 
   const wordCount = plain.split(/\s+/).filter(Boolean).length
@@ -590,6 +672,45 @@ export function NoteEditor({
     onToast('Restored to your notes')
   }
 
+  const restoreHistory = async () => {
+    if (!activeHistoryId || !token) return
+    try {
+      await apiRequest(`/api/notes/${summary.id}/history/${activeHistoryId}/restore`, {
+        method: 'POST',
+        token,
+      })
+      setHistoryRestoreOpen(false)
+      setHistoryOpen(false)
+      setHistoryEntryId(null)
+      onToast('Version restored')
+    } catch (error) {
+      setHistoryRestoreOpen(false)
+      onToast(error instanceof Error ? error.message : 'Could not restore that version')
+    }
+  }
+
+  const insertNoteLink = (target: NoteSummary) => {
+    const block = blockArray(doc)
+      .toArray()
+      .find((candidate) => blockView(candidate).id === activeBlockId) ??
+      blockArray(doc).get(0)
+    if (!block) return
+    const text = blockTextNode(block)
+    const prefix = text.length > 0 && !/\s$/.test(text.toString()) ? ' ' : ''
+    text.insert(text.length, `${prefix}[[${effectiveTitle(target)}]]`)
+    touchNote()
+    setLinkOpen(false)
+    setLinkQuery('')
+    onToast('Note link inserted')
+  }
+
+  const linkMatches = linkTargets
+    .filter((target) => target.id !== summary.id && !target.trashed)
+    .filter((target) =>
+      effectiveTitle(target).toLowerCase().includes(linkQuery.trim().toLowerCase()),
+    )
+    .slice(0, 8)
+
   const unlockForVisit = async (password: string | null) => {
     try {
       await onUnlock(password)
@@ -599,6 +720,12 @@ export function NoteEditor({
       onToast(error instanceof Error ? error.message : 'Could not unlock this note')
     }
   }
+
+  const lockAgain = useCallback(() => {
+    setUnlocked(false)
+    void onReleaseUnlock().catch(() => undefined)
+    onToast('Note locked again')
+  }, [onReleaseUnlock, onToast])
 
   return (
     <section
@@ -627,12 +754,24 @@ export function NoteEditor({
         <div className="note__crumb">
           <span className="mono note__date">{dayLabel(noteDay(summary))}</span>
           <span className="note__sep" aria-hidden="true" />
+          {parentTitle ? (
+            <button
+              type="button"
+              className="note__parent"
+              onClick={() => summary.parentId && onOpenNote(summary.parentId)}
+              title="Open parent page"
+            >
+              ↳ {parentTitle}
+            </button>
+          ) : null}
           <span className="note__role">
             {summary.role === 'owner'
               ? collaboratorCount > 1
                 ? `Shared with ${collaboratorCount - 1}`
                 : 'Only you'
-              : `Shared by ${summary.ownerName}`}
+              : isViewer
+                ? `View only · ${summary.ownerName}`
+                : `Shared by ${summary.ownerName}`}
           </span>
           {isLocked ? (
             <span className="note__lock" title="Locked" aria-label="Locked">
@@ -658,6 +797,22 @@ export function NoteEditor({
               ))}
               {peers.length > 3 ? <span className="avatars__more">+{peers.length - 3}</span> : null}
             </div>
+          ) : null}
+
+          {canComment ? (
+            <button
+              type="button"
+              className={`icon-btn${commentsOpen ? ' is-on' : ''}`}
+              onClick={() => {
+                setCommentsOpen(true)
+                setMenuOpen(false)
+                setSlash(null)
+              }}
+              aria-label="Open comments"
+              title="Comments"
+            >
+              <CommentIcon size={18} />
+            </button>
           ) : null}
 
           {!isTrashed ? (
@@ -776,6 +931,26 @@ export function NoteEditor({
                   <button type="button" className="menu__item" onClick={tidyBlankLines}>
                     Tidy blank lines
                   </button>
+                  <button
+                    type="button"
+                    className="menu__item"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setLinkOpen(true)
+                    }}
+                  >
+                    Insert page link…
+                  </button>
+                  <button
+                    type="button"
+                    className="menu__item"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onCreateSubpage()
+                    }}
+                  >
+                    New subpage
+                  </button>
                   {isOwner && !isLocked ? (
                     <button
                       type="button"
@@ -795,8 +970,7 @@ export function NoteEditor({
                         className="menu__item"
                         onClick={() => {
                           setMenuOpen(false)
-                          setUnlocked(false)
-                          onToast('Note locked again')
+                          lockAgain()
                         }}
                       >
                         Lock again
@@ -845,6 +1019,12 @@ export function NoteEditor({
         </div>
       ) : null}
 
+      {isViewer && !isTrashed ? (
+        <div className="banner banner--viewer">
+          <span>You are viewing this note read-only. You can still leave comments.</span>
+        </div>
+      ) : null}
+
       {isLocked && !isTrashed ? (
         unlocked ? (
           <div className="banner banner--unlocked">
@@ -853,10 +1033,7 @@ export function NoteEditor({
             <button
               type="button"
               className="link"
-              onClick={() => {
-                setUnlocked(false)
-                onToast('Note locked again')
-              }}
+              onClick={lockAgain}
             >
               Lock again
             </button>
@@ -924,6 +1101,8 @@ export function NoteEditor({
             setHistoryEntryId(null)
           }}
           onRefresh={history.refresh}
+          onRestore={() => setHistoryRestoreOpen(true)}
+          canRestore={!readOnly}
         />
       ) : (
       <div className="note__scroll" onKeyDownCapture={onUndoKeys}>
@@ -1119,7 +1298,7 @@ export function NoteEditor({
               remoteCursors={cursorsByBlock.get(view.id) ?? []}
               api={api}
               readOnly={readOnly}
-              onEdited={noop}
+              onEdited={touchNote}
               onFocusBlock={handleBlockFocus}
               customKeyboard={keyboardEnabled}
               registerKeyboard={blockKeyboard.register}
@@ -1131,6 +1310,7 @@ export function NoteEditor({
               className="block-add"
               onClick={() => {
                 const block = createBlock(doc, views.length, { type: 'text', text: '' })
+                touchNote()
                 requestFocus(blockView(block).id, 'start')
               }}
             >
@@ -1138,6 +1318,62 @@ export function NoteEditor({
             </button>
           ) : null}
         </div>
+
+        {backlinks.length > 0 || outboundLinks.length > 0 || subpages.length > 0 ? (
+          <section className="backlinks" aria-label="Linked pages">
+            {backlinks.length > 0 ? (
+              <div className="backlinks__group">
+                <span className="eyebrow">Linked from</span>
+                <div className="backlinks__list">
+                  {backlinks.map((note) => (
+                    <button
+                      key={note.id}
+                      type="button"
+                      className="backlink"
+                      onClick={() => onOpenNote(note.id)}
+                    >
+                      {effectiveTitle(note)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {outboundLinks.length > 0 ? (
+              <div className="backlinks__group">
+                <span className="eyebrow">Links to</span>
+                <div className="backlinks__list">
+                  {outboundLinks.map((note) => (
+                    <button
+                      key={note.id}
+                      type="button"
+                      className="backlink"
+                      onClick={() => onOpenNote(note.id)}
+                    >
+                      {effectiveTitle(note)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {subpages.length > 0 ? (
+              <div className="backlinks__group">
+                <span className="eyebrow">Subpages</span>
+                <div className="backlinks__list">
+                  {subpages.map((note) => (
+                    <button
+                      key={note.id}
+                      type="button"
+                      className="backlink"
+                      onClick={() => onOpenNote(note.id)}
+                    >
+                      {effectiveTitle(note)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <footer className="note__footer">
           <span>{wordCount} words</span>
@@ -1150,7 +1386,13 @@ export function NoteEditor({
           </span>
           <span className="mono">edited {formatTime(meta.updatedAt)}</span>
           <span className="note__footer-right">
-            {status === 'online' ? 'Saved to the server' : 'Saved on this device'}
+            {status === 'offline' || status === 'connecting'
+              ? 'Saved on this device'
+              : saveState === 'error'
+                ? 'Could not save to server'
+                : saveState === 'saved'
+                  ? `Saved to server · ${formatTime(savedAt ?? meta.updatedAt)}`
+                  : 'Saving…'}
           </span>
         </footer>
       </div>
@@ -1164,6 +1406,71 @@ export function NoteEditor({
         onConfirm={moveToTrash}
         onClose={() => setTrashConfirmOpen(false)}
       />
+
+      <ConfirmDialog
+        open={historyRestoreOpen}
+        title="Restore this version?"
+        body="This replaces the current title and body for everyone on the note. The current version stays in activity history, so you can choose it again later."
+        confirmLabel="Restore version"
+        onConfirm={() => void restoreHistory()}
+        onClose={() => setHistoryRestoreOpen(false)}
+      />
+
+      <CommentsPanel
+        open={commentsOpen}
+        onClose={() => setCommentsOpen(false)}
+        noteTitle={meta.title || summary.title}
+        comments={comments.comments}
+        members={members}
+        currentUserId={currentUserId}
+        isOwner={isOwner}
+        loading={comments.loading}
+        error={comments.error}
+        busy={comments.busy}
+        onAdd={comments.add}
+        onResolve={comments.resolve}
+        onDelete={comments.remove}
+        onRefresh={comments.refresh}
+      />
+
+      <Modal
+        open={linkOpen}
+        title="Insert a page link"
+        onClose={() => {
+          setLinkOpen(false)
+          setLinkQuery('')
+        }}
+        size="sm"
+      >
+        <p className="modal__lede">
+          Link to another note you can open. Backlinks appear on that note automatically.
+        </p>
+        <input
+          className="input"
+          value={linkQuery}
+          placeholder="Search pages…"
+          autoFocus
+          onChange={(event) => setLinkQuery(event.target.value)}
+          aria-label="Search pages to link"
+        />
+        <div className="link-list">
+          {linkMatches.length === 0 ? (
+            <p className="muted">No matching pages.</p>
+          ) : (
+            linkMatches.map((target) => (
+              <button
+                key={target.id}
+                type="button"
+                className="link-list__item"
+                onClick={() => insertNoteLink(target)}
+              >
+                <span>{effectiveTitle(target)}</span>
+                {target.parentId ? <span className="mono">subpage</span> : null}
+              </button>
+            ))
+          )}
+        </div>
+      </Modal>
 
       <SaveTemplateDialog
         open={saveTemplateOpen && !readOnly}
@@ -1207,8 +1514,8 @@ export function NoteEditor({
           onBackspace={blockKeyboard.backspace}
           onReturn={blockKeyboard.newline}
           onMoveCaret={blockKeyboard.moveCaret}
-          onUndo={() => undoRef.current?.undo()}
-          onRedo={() => undoRef.current?.redo()}
+          onUndo={undoNote}
+          onRedo={redoNote}
           onDismiss={dismissKeyboard}
           onKeepFocus={blockKeyboard.refocus}
           onHeightChange={setKeyboardHeight}

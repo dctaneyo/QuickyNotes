@@ -5,6 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer } from 'ws'
+import * as Y from 'yjs'
+import { noteSnapshot } from './history.js'
 import {
   db,
   countUsers,
@@ -28,15 +30,28 @@ import {
   registerFailure,
   requireAdmin,
   requireAuth,
+  sessionIsActive,
   throttleIp,
   userForToken,
   verifyPin,
 } from './auth.js'
-import { attachConnection, closeAllRooms, onRoomActivity, roomStats } from './realtime.js'
+import {
+  attachConnection,
+  closeAllRooms,
+  disconnectNoteRoom,
+  disconnectNoteUser,
+  disconnectPublicRoom,
+  onRoomActivity,
+  restoreHistoricalVersion,
+  roomStats,
+  setConnectionAuthorizer,
+} from './realtime.js'
 import {
   attachEvents,
   noteAudience,
   pushAdminSnapshot,
+  pushComments,
+  pushMentions,
   pushNotes,
   pushNotesForNote,
   pushNotesForUser,
@@ -211,6 +226,7 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(bearerToken(req)))
+  disconnectUser(req.user.user_id, 4401)
   scheduleAdminPush()
   res.json({ ok: true })
 })
@@ -233,11 +249,14 @@ app.post(
       await hashPin(newPin),
       req.user.user_id,
     )
-    // Other devices signed in with the old PIN are signed out.
+    // Other devices signed in with the old PIN are signed out. Keep this
+    // browser's session, but tear down every other live socket immediately.
+    const currentSession = hashToken(bearerToken(req))
     db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?').run(
       req.user.user_id,
-      hashToken(bearerToken(req)),
+      currentSession,
     )
+    disconnectUser(req.user.user_id, 4401, currentSession)
     scheduleAdminPush()
     res.json({ ok: true })
   }),
@@ -459,6 +478,8 @@ function mapNote(row) {
     memberCount: row.member_count ?? 1,
     locked: row.locked === 1,
     lockProtected: row.lock_protected === 1,
+    parentId: row.parent_id ?? null,
+    publicToken: row.role === 'owner' ? row.public_token ?? null : null,
     text: row.text ?? '',
   }
 }
@@ -534,6 +555,266 @@ app.get('/api/notes', requireAuth, (req, res) => {
   res.json({ notes: listNotesForUser(req.user.user_id, query) })
 })
 
+function mapComment(row) {
+  const mentions = db
+    .prepare(
+      `SELECT cm.user_id, u.display_name
+       FROM comment_mentions cm JOIN users u ON u.user_id = cm.user_id
+       WHERE cm.comment_id = ? ORDER BY u.display_name COLLATE NOCASE`,
+    )
+    .all(row.id)
+    .map((mention) => ({ userId: mention.user_id, displayName: mention.display_name }))
+  return {
+    id: row.id,
+    noteId: row.note_id,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    body: row.body,
+    resolvedAt: row.resolved_at ?? 0,
+    createdAt: row.created_at,
+    mentions,
+  }
+}
+
+function listComments(noteId) {
+  return db
+    .prepare('SELECT * FROM note_comments WHERE note_id = ? ORDER BY created_at ASC')
+    .all(noteId)
+    .map(mapComment)
+}
+
+function mentionInbox(userId, limit = 40) {
+  const rows = db
+    .prepare(
+      `SELECT c.*, n.title, n.trashed, cm.read_at AS mention_read_at
+       FROM comment_mentions cm
+       JOIN note_comments c ON c.id = cm.comment_id
+       JOIN notes n ON n.id = c.note_id
+       WHERE cm.user_id = ? AND n.trashed = 0
+         AND (n.owner_id = ? OR EXISTS (
+           SELECT 1 FROM note_members m WHERE m.note_id = n.id AND m.user_id = ?
+         ))
+       ORDER BY c.created_at DESC LIMIT ?`,
+    )
+    .all(userId, userId, userId, limit)
+  return rows.map((row) => ({
+    id: row.id,
+    noteId: row.note_id,
+    noteTitle: row.title,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    body: row.body,
+    createdAt: row.created_at,
+    readAt: row.mention_read_at ?? 0,
+  }))
+}
+
+app.get('/api/notes/export', requireAuth, (req, res) => {
+  const notes = listNotesForUser(req.user.user_id)
+    .filter((note) => !note.trashed)
+    .map((summary) => {
+      const row = db.prepare('SELECT content FROM notes WHERE id = ?').get(summary.id)
+      const blockDoc = new Y.Doc()
+      if (row?.content) Y.applyUpdate(blockDoc, new Uint8Array(row.content))
+      const snapshot = noteSnapshot(blockDoc)
+      blockDoc.destroy()
+      return {
+        id: summary.id,
+        title: snapshot.title || summary.title,
+        due: summary.due,
+        tags: summary.tags,
+        starred: summary.starred,
+        parentId: summary.parentId,
+        blocks: snapshot.blocks.map(({ type, text, checked, indent, format }) => ({
+          type,
+          text,
+          checked,
+          indent,
+          format,
+        })),
+      }
+    })
+  res.set('Cache-Control', 'no-store')
+  res
+    .type('application/json')
+    .set('Content-Disposition', 'attachment; filename="quicky-notes-export.json"')
+    .send(JSON.stringify({ version: 1, exportedAt: Date.now(), notes }, null, 2))
+})
+
+app.get('/api/notes/:id/comments', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  const access = accessFor(req.params.id, req.user.user_id)
+  if (!access?.role) {
+    res.status(404).json({ error: 'That note does not exist for you.' })
+    return
+  }
+  res.json({ comments: listComments(req.params.id) })
+})
+
+app.post('/api/notes/:id/comments', requireAuth, (req, res) => {
+  const access = accessFor(req.params.id, req.user.user_id)
+  if (!access?.role) {
+    res.status(404).json({ error: 'That note does not exist for you.' })
+    return
+  }
+  const body = typeof req.body?.body === 'string' ? req.body.body.trim() : ''
+  if (!body) {
+    res.status(400).json({ error: 'Write a comment first.' })
+    return
+  }
+  if (body.length > 4000) {
+    res.status(400).json({ error: 'Comments can be up to 4,000 characters.' })
+    return
+  }
+  const allowed = new Set(noteAudience(req.params.id))
+  allowed.delete(req.user.user_id)
+  const requested = Array.isArray(req.body?.mentions) ? req.body.mentions : []
+  const mentionIds = [
+    ...new Set(
+      requested.filter(
+        (value) => typeof value === 'string' && USER_ID_RE.test(value) && allowed.has(value),
+      ),
+    ),
+  ]
+  const id = randomUUID()
+  const now = Date.now()
+  db.exec('BEGIN')
+  try {
+    db.prepare(
+      `INSERT INTO note_comments (id, note_id, author_id, author_name, body, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(id, req.params.id, req.user.user_id, req.user.display_name, body, now)
+    for (const userId of mentionIds) {
+      db.prepare('INSERT INTO comment_mentions (comment_id, user_id) VALUES (?, ?)').run(
+        id,
+        userId,
+      )
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+  pushComments(req.params.id)
+  pushMentions(mentionIds)
+  res.status(201).json({ comment: mapComment(db.prepare('SELECT * FROM note_comments WHERE id = ?').get(id)) })
+})
+
+app.patch('/api/notes/:id/comments/:commentId', requireAuth, (req, res) => {
+  const access = accessFor(req.params.id, req.user.user_id)
+  if (!access?.role) {
+    res.status(404).json({ error: 'That note does not exist for you.' })
+    return
+  }
+  const row = db
+    .prepare('SELECT * FROM note_comments WHERE id = ? AND note_id = ?')
+    .get(req.params.commentId, req.params.id)
+  if (!row) {
+    res.status(404).json({ error: 'That comment does not exist.' })
+    return
+  }
+  if (row.author_id !== req.user.user_id && access.role !== 'owner') {
+    res.status(403).json({ error: 'Only the author or note owner can resolve this comment.' })
+    return
+  }
+  const resolved = req.body?.resolved === true
+  db.prepare('UPDATE note_comments SET resolved_at = ? WHERE id = ?').run(
+    resolved ? Date.now() : 0,
+    row.id,
+  )
+  pushComments(req.params.id)
+  res.json({ comment: mapComment(db.prepare('SELECT * FROM note_comments WHERE id = ?').get(row.id)) })
+})
+
+app.delete('/api/notes/:id/comments/:commentId', requireAuth, (req, res) => {
+  const access = accessFor(req.params.id, req.user.user_id)
+  if (!access?.role) {
+    res.status(404).json({ error: 'That note does not exist for you.' })
+    return
+  }
+  const row = db
+    .prepare('SELECT * FROM note_comments WHERE id = ? AND note_id = ?')
+    .get(req.params.commentId, req.params.id)
+  if (!row) {
+    res.status(404).json({ error: 'That comment does not exist.' })
+    return
+  }
+  if (row.author_id !== req.user.user_id && access.role !== 'owner') {
+    res.status(403).json({ error: 'Only the author or note owner can delete this comment.' })
+    return
+  }
+  const mentioned = db
+    .prepare('SELECT user_id FROM comment_mentions WHERE comment_id = ?')
+    .all(row.id)
+    .map((entry) => entry.user_id)
+  db.prepare('DELETE FROM note_comments WHERE id = ?').run(row.id)
+  pushComments(req.params.id)
+  pushMentions(mentioned)
+  res.json({ ok: true })
+})
+
+app.get('/api/mentions', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  const mentions = mentionInbox(req.user.user_id)
+  res.json({ mentions, unread: mentions.filter((mention) => !mention.readAt).length })
+})
+
+app.post('/api/mentions/read', requireAuth, (req, res) => {
+  const ids = Array.isArray(req.body?.commentIds)
+    ? req.body.commentIds.filter((value) => typeof value === 'string').slice(0, 100)
+    : []
+  if (ids.length === 0) {
+    db.prepare(
+      `UPDATE comment_mentions SET read_at = ?
+       WHERE user_id = ? AND read_at = 0 AND comment_id IN (
+         SELECT id FROM note_comments WHERE note_id IN (
+           SELECT id FROM notes WHERE owner_id = ? OR id IN (
+             SELECT note_id FROM note_members WHERE user_id = ?
+           )
+         )
+       )`,
+    ).run(Date.now(), req.user.user_id, req.user.user_id, req.user.user_id)
+  } else {
+    const placeholders = ids.map(() => '?').join(',')
+    db.prepare(
+      `UPDATE comment_mentions SET read_at = ? WHERE user_id = ? AND comment_id IN (${placeholders})`,
+    ).run(Date.now(), req.user.user_id, ...ids)
+  }
+  res.json({ ok: true })
+})
+
+app.get('/api/public/notes/:token', (req, res) => {
+  res.set('Cache-Control', 'no-store')
+  const row = db
+    .prepare(
+      `SELECT n.*, u.display_name AS owner_name,
+              (l.note_id IS NOT NULL) AS locked
+       FROM notes n
+       JOIN users u ON u.user_id = n.owner_id
+       LEFT JOIN note_locks l ON l.note_id = n.id
+       WHERE n.public_token = ? AND n.trashed = 0`,
+    )
+    .get(req.params.token)
+  if (!row) {
+    res.status(404).json({ error: 'This public link is no longer available.' })
+    return
+  }
+  res.json({
+    note: {
+      id: row.id,
+      title: row.title,
+      due: row.due,
+      tags: parseTags(row.tags),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      ownerName: row.owner_name,
+      locked: row.locked === 1,
+      text: row.text ?? '',
+      content: row.content ? Buffer.from(row.content).toString('base64') : null,
+    },
+  })
+})
+
 app.post('/api/notes', requireAuth, (req, res) => {
   const id = String(req.body?.id ?? '')
   if (!/^[A-Za-z0-9:_-]{8,80}$/.test(id)) {
@@ -549,13 +830,22 @@ app.post('/api/notes', requireAuth, (req, res) => {
     res.json({ created: false })
     return
   }
+  const requestedParent = typeof req.body?.parentId === 'string' ? req.body.parentId : null
+  if (requestedParent) {
+    const parent = accessFor(requestedParent, req.user.user_id)
+    if (!parent?.role) {
+      res.status(400).json({ error: 'That parent note does not exist for you.' })
+      return
+    }
+  }
   db.prepare(
-    `INSERT INTO notes (id, owner_id, title, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO notes (id, owner_id, title, parent_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     req.user.user_id,
     String(req.body?.title ?? '').slice(0, 200),
+    requestedParent,
     Date.now(),
     Date.now(),
   )
@@ -621,6 +911,34 @@ app.get('/api/notes/:id/history', requireAuth, (req, res) => {
   })
 })
 
+app.post('/api/notes/:id/history/:entryId/restore', requireAuth, (req, res) => {
+  const access = accessFor(req.params.id, req.user.user_id)
+  if (!access?.role || access.role === 'viewer') {
+    res.status(403).json({ error: 'You do not have permission to restore this note.' })
+    return
+  }
+  if (!canWriteNote(req.params.id, hashToken(bearerToken(req)))) {
+    res.status(403).json({ error: 'Unlock this note before restoring a version.' })
+    return
+  }
+  const entryId = Number(req.params.entryId)
+  if (!Number.isInteger(entryId)) {
+    res.status(400).json({ error: 'That history entry is not valid.' })
+    return
+  }
+  const snapshot = restoreHistoricalVersion(req.params.id, entryId, req.user)
+  if (!snapshot) {
+    res.status(404).json({ error: 'That history entry is no longer available.' })
+    return
+  }
+  res.json({
+    ok: true,
+    title: snapshot.title,
+    blocks: snapshot.blocks.length,
+    restoredAt: Date.now(),
+  })
+})
+
 app.delete('/api/notes/trash', requireAuth, (req, res) => {
   const userId = req.user.user_id
   const rows = db
@@ -663,6 +981,15 @@ app.delete('/api/notes/trash', requireAuth, (req, res) => {
     throw error
   }
 
+  for (const row of owned) {
+    revokeNoteUnlocksForNote(row.id)
+    disconnectNoteRoom(row.id, 4403)
+  }
+  for (const row of shared) {
+    revokeNoteUnlocksForUser(row.id, userId)
+    disconnectNoteUser(row.id, userId, 4403)
+  }
+
   pushNotes([...audience])
   scheduleAdminPush()
   res.json({ deleted: owned.length, removed: shared.length })
@@ -687,11 +1014,15 @@ app.delete('/api/notes/:id', requireAuth, (req, res) => {
       req.params.id,
       req.user.user_id,
     )
+    revokeNoteUnlocksForUser(req.params.id, req.user.user_id)
+    disconnectNoteUser(req.params.id, req.user.user_id, 4403)
     pushNotes(audience)
     scheduleAdminPush()
     res.json({ ok: true, removed: true })
     return
   }
+  revokeNoteUnlocksForNote(req.params.id)
+  disconnectNoteRoom(req.params.id, 4403)
   db.prepare('DELETE FROM notes WHERE id = ?').run(req.params.id)
   pushNotes(audience)
   scheduleAdminPush()
@@ -718,10 +1049,12 @@ app.post('/api/notes/:id/members', requireAuth, (req, res) => {
     res.status(404).json({ error: 'No account has that ID.' })
     return
   }
+  const role = req.body?.role === 'viewer' ? 'viewer' : 'editor'
   db.prepare(
-    `INSERT INTO note_members (note_id, user_id, role, created_at) VALUES (?, ?, 'editor', ?)
-     ON CONFLICT(note_id, user_id) DO NOTHING`,
-  ).run(req.params.id, targetId, Date.now())
+    `INSERT INTO note_members (note_id, user_id, role, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(note_id, user_id) DO UPDATE SET role = excluded.role`,
+  ).run(req.params.id, targetId, role, Date.now())
+  if (role === 'viewer') disconnectNoteUser(req.params.id, targetId, 4003)
   pushNotesForNote(req.params.id)
   scheduleAdminPush()
   res.json({ members: membersOf(req.params.id) })
@@ -744,9 +1077,60 @@ app.delete('/api/notes/:id/members/:userId', requireAuth, (req, res) => {
     req.params.id,
     targetId,
   )
+  revokeNoteUnlocksForUser(req.params.id, targetId)
+  disconnectNoteUser(req.params.id, targetId, 4403)
   pushNotes(audience)
   scheduleAdminPush()
   res.json({ members: membersOf(req.params.id) })
+})
+
+app.patch('/api/notes/:id/members/:userId', requireAuth, (req, res) => {
+  const access = accessFor(req.params.id, req.user.user_id)
+  if (!access || access.role !== 'owner') {
+    res.status(403).json({ error: 'Only the owner can change someone’s role.' })
+    return
+  }
+  const targetId = req.params.userId
+  if (targetId === access.ownerId) {
+    res.status(400).json({ error: 'The owner’s role cannot be changed.' })
+    return
+  }
+  const role = req.body?.role === 'viewer' ? 'viewer' : 'editor'
+  const result = db
+    .prepare('UPDATE note_members SET role = ? WHERE note_id = ? AND user_id = ?')
+    .run(role, req.params.id, targetId)
+  if (Number(result.changes) === 0) {
+    res.status(404).json({ error: 'That person is not on this note.' })
+    return
+  }
+  if (role === 'viewer') disconnectNoteUser(req.params.id, targetId, 4003)
+  pushNotesForNote(req.params.id)
+  res.json({ members: membersOf(req.params.id) })
+})
+
+app.post('/api/notes/:id/public', requireAuth, (req, res) => {
+  const access = accessFor(req.params.id, req.user.user_id)
+  if (!access || access.role !== 'owner') {
+    res.status(403).json({ error: 'Only the owner can manage a public link.' })
+    return
+  }
+  const enabled = req.body?.enabled === true
+  const row = db.prepare('SELECT public_token, trashed FROM notes WHERE id = ?').get(req.params.id)
+  if (!row || row.trashed === 1) {
+    res.status(400).json({ error: 'Restore this note before sharing it publicly.' })
+    return
+  }
+  let token = row.public_token ?? null
+  if (enabled) {
+    token = token || randomUUID().replace(/-/g, '')
+    db.prepare('UPDATE notes SET public_token = ? WHERE id = ?').run(token, req.params.id)
+  } else {
+    token = null
+    db.prepare('UPDATE notes SET public_token = NULL WHERE id = ?').run(req.params.id)
+    disconnectPublicRoom(req.params.id, 4403)
+  }
+  pushNotesForNote(req.params.id)
+  res.json({ enabled, publicToken: token })
 })
 
 // ------------------------------------------------------------ note locks ----
@@ -758,6 +1142,64 @@ const UNLOCK_MAX_FAILURES = 5
 function lockFor(noteId) {
   return db.prepare('SELECT password_hash FROM note_locks WHERE note_id = ?').get(noteId)
 }
+
+// Unlock grants are per browser session and per note. They live in memory so a
+// restart re-locks every note, and they are revoked when the note is locked or
+// when the user locks it again.
+const noteUnlocks = new Map()
+const NOTE_UNLOCK_TTL_MS = 12 * 60 * 60 * 1000
+
+function unlockKey(noteId, sessionHash) {
+  return `${noteId}:${sessionHash}`
+}
+
+function grantNoteUnlock(noteId, sessionHash, userId) {
+  noteUnlocks.set(unlockKey(noteId, sessionHash), {
+    noteId,
+    sessionHash,
+    userId,
+    expiresAt: Date.now() + NOTE_UNLOCK_TTL_MS,
+  })
+}
+
+function hasNoteUnlock(noteId, sessionHash) {
+  const key = unlockKey(noteId, sessionHash)
+  const grant = noteUnlocks.get(key)
+  if (!grant) return false
+  if (grant.expiresAt <= Date.now()) {
+    noteUnlocks.delete(key)
+    return false
+  }
+  return true
+}
+
+function revokeNoteUnlock(noteId, sessionHash) {
+  return noteUnlocks.delete(unlockKey(noteId, sessionHash))
+}
+
+function revokeNoteUnlocksForNote(noteId) {
+  for (const [key, grant] of noteUnlocks) {
+    if (grant.noteId === noteId) noteUnlocks.delete(key)
+  }
+}
+
+function revokeNoteUnlocksForUser(noteId, userId) {
+  for (const [key, grant] of noteUnlocks) {
+    if (grant.noteId === noteId && grant.userId === userId) noteUnlocks.delete(key)
+  }
+}
+
+function canWriteNote(noteId, sessionHash) {
+  if (!lockFor(noteId)) return true
+  return hasNoteUnlock(noteId, sessionHash)
+}
+
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, grant] of noteUnlocks) {
+    if (grant.expiresAt <= now) noteUnlocks.delete(key)
+  }
+}, 10 * 60 * 1000).unref()
 
 app.post(
   '/api/notes/:id/lock',
@@ -783,6 +1225,8 @@ app.post(
       `INSERT INTO note_locks (note_id, password_hash, locked_at) VALUES (?, ?, ?)
        ON CONFLICT(note_id) DO UPDATE SET password_hash = excluded.password_hash, locked_at = excluded.locked_at`,
     ).run(req.params.id, hash, Date.now())
+    revokeNoteUnlocksForNote(req.params.id)
+    disconnectNoteRoom(req.params.id, 4003)
     pushNotesForNote(req.params.id)
     res.json({ locked: true, lockProtected: Boolean(password) })
   }),
@@ -804,6 +1248,8 @@ app.post(
       return
     }
     if (access.role === 'owner') {
+      grantNoteUnlock(req.params.id, hashToken(bearerToken(req)), req.user.user_id)
+      disconnectNoteUser(req.params.id, req.user.user_id, 4003)
       res.json({ ok: true })
       return
     }
@@ -831,9 +1277,19 @@ app.post(
       return
     }
     unlockAttempts.delete(key)
+    grantNoteUnlock(req.params.id, hashToken(bearerToken(req)), req.user.user_id)
+    // Reconnect writable so any offline edits made while read-only are merged
+    // through the normal Yjs handshake instead of remaining local-only.
+    disconnectNoteUser(req.params.id, req.user.user_id, 4003)
     res.json({ ok: true })
   }),
 )
+
+app.delete('/api/notes/:id/unlock', requireAuth, (req, res) => {
+  const removed = revokeNoteUnlock(req.params.id, hashToken(bearerToken(req)))
+  if (removed) disconnectNoteUser(req.params.id, req.user.user_id, 4003)
+  res.json({ ok: true })
+})
 
 app.delete('/api/notes/:id/lock', requireAuth, (req, res) => {
   const access = accessFor(req.params.id, req.user.user_id)
@@ -846,6 +1302,8 @@ app.delete('/api/notes/:id/lock', requireAuth, (req, res) => {
     return
   }
   db.prepare('DELETE FROM note_locks WHERE note_id = ?').run(req.params.id)
+  revokeNoteUnlocksForNote(req.params.id)
+  disconnectNoteRoom(req.params.id, 4003)
   pushNotesForNote(req.params.id)
   res.json({ locked: false, lockProtected: false })
 })
@@ -1109,6 +1567,8 @@ function purgeExpiredTrash() {
   const audience = new Set()
   for (const row of expired) {
     for (const userId of noteAudience(row.id)) audience.add(userId)
+    revokeNoteUnlocksForNote(row.id)
+    disconnectNoteRoom(row.id, 4403)
     db.prepare('DELETE FROM notes WHERE id = ?').run(row.id)
   }
   pushNotes([...audience])
@@ -1190,13 +1650,15 @@ app.post('/api/admin/users/:userId/sessions', requireAuth, requireAdmin, (req, r
     return
   }
   const isSelf = user.user_id === req.user.user_id
+  const currentSession = hashToken(bearerToken(req))
   const result = isSelf
     ? db
         .prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?')
-        .run(user.user_id, hashToken(bearerToken(req)))
+        .run(user.user_id, currentSession)
     : db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.user_id)
   const revoked = Number(result.changes)
-  if (!isSelf) disconnectUser(user.user_id)
+  if (isSelf) disconnectUser(user.user_id, 4401, currentSession)
+  else disconnectUser(user.user_id, 4401)
   logAdmin(req.user.user_id, user.user_id, 'sessions', `${revoked} signed out`)
   pushAdminSnapshot()
   res.json({ revoked })
@@ -1223,7 +1685,7 @@ app.post('/api/admin/users/:userId/suspend', requireAuth, requireAdmin, (req, re
   )
   if (suspend) {
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.user_id)
-    disconnectUser(user.user_id)
+    disconnectUser(user.user_id, 4401)
   }
   logAdmin(req.user.user_id, user.user_id, suspend ? 'suspend' : 'restore')
   pushAdminSnapshot()
@@ -1272,7 +1734,7 @@ app.delete('/api/admin/users/:userId', requireAuth, requireAdmin, (req, res) => 
   }
   pushNotes([...affected])
   pushAdminSnapshot()
-  disconnectUser(user.user_id)
+  disconnectUser(user.user_id, 4401)
   res.json({ ok: true, notesTransferred: owned })
 })
 
@@ -1297,6 +1759,7 @@ app.post(
     )
     // Any device still holding a session for that account must sign in again.
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.user_id)
+    disconnectUser(user.user_id, 4401)
     logAdmin(req.user.user_id, user.user_id, 'pin')
     pushAdminSnapshot()
     res.json({ ok: true })
@@ -1406,11 +1869,11 @@ app.use((err, req, res, next) => {
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 })
 
-function disconnectUser(userId, code = 4001) {
+function disconnectUser(userId, code = 4401, exceptSessionHash = null) {
   for (const client of wss.clients) {
-    if (client.user?.userId === userId) {
-      client.close(code, code === 4001 ? 'Account access changed' : 'Reconnect')
-    }
+    if (client.user?.userId !== userId) continue
+    if (exceptSessionHash && client.sessionHash === exceptSessionHash) continue
+    client.close(code, code === 4002 ? 'Reconnect' : 'Access changed')
   }
 }
 
@@ -1430,6 +1893,31 @@ function canAccessNote(noteId, userId) {
     .get(noteId, userId, userId)
 }
 
+// Re-check live sockets on every message. This is the server-side guard for
+// membership removal, note locks, and sessions that were revoked after the
+// connection was established.
+setConnectionAuthorizer((conn) => {
+  if (conn.publicShare) {
+    const row = db
+      .prepare('SELECT id, trashed FROM notes WHERE public_token = ?')
+      .get(conn.publicShare)
+    if (!row || row.trashed === 1 || row.id !== conn.noteId) {
+      return { read: false, write: false, code: 4403 }
+    }
+    return { read: true, write: false }
+  }
+  if (!conn.sessionHash || !sessionIsActive(conn.sessionHash)) {
+    return { read: false, write: false, code: 4401 }
+  }
+  if (!conn.noteId) return { read: true, write: true }
+  const access = accessFor(conn.noteId, conn.user?.userId)
+  if (!access?.role) return { read: false, write: false, code: 4403 }
+  return {
+    read: true,
+    write: access.role !== 'viewer' && canWriteNote(conn.noteId, conn.sessionHash),
+  }
+})
+
 server.on('upgrade', (req, socket, head) => {
   let url
   try {
@@ -1442,12 +1930,34 @@ server.on('upgrade', (req, socket, head) => {
     rejectUpgrade(socket, 404, 'Not Found')
     return
   }
-  const user = userForToken(url.searchParams.get('token'))
+  const room = decodeURIComponent(url.pathname.slice('/ws/'.length))
+  const share = url.searchParams.get('share')
+  if (share) {
+    if (!room.startsWith('note:')) {
+      rejectUpgrade(socket, 404, 'Not Found')
+      return
+    }
+    const published = db
+      .prepare('SELECT id, trashed FROM notes WHERE public_token = ?')
+      .get(share)
+    if (!published || published.trashed === 1 || room !== `note:${published.id}`) {
+      rejectUpgrade(socket, 403, 'Forbidden')
+      return
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.publicShare = share
+      ws.noteId = published.id
+      ws.user = null
+      attachConnection(ws, room)
+    })
+    return
+  }
+  const token = url.searchParams.get('token')
+  const user = userForToken(token)
   if (!user) {
     rejectUpgrade(socket, 401, 'Unauthorized')
     return
   }
-  const room = decodeURIComponent(url.pathname.slice('/ws/'.length))
   const isNote = room.startsWith('note:')
   if (!isNote && room !== 'lobby' && room !== 'events') {
     rejectUpgrade(socket, 404, 'Not Found')
@@ -1459,6 +1969,8 @@ server.on('upgrade', (req, socket, head) => {
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
     ws.user = publicUser(user)
+    ws.sessionHash = hashToken(token || '')
+    ws.noteId = isNote ? room.slice(5) : null
     if (room === 'events') {
       attachEvents(ws)
       sendEvent(ws, { type: 'notes:snapshot', notes: listNotesForUser(user.user_id) })

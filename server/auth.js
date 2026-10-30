@@ -95,6 +95,17 @@ export function userForToken(token) {
   return row
 }
 
+export function sessionIsActive(tokenHash, now = Date.now()) {
+  if (!tokenHash) return false
+  return !!db
+    .prepare(
+      `SELECT 1 FROM sessions s
+       JOIN users u ON u.user_id = s.user_id
+       WHERE s.token_hash = ? AND s.expires_at > ? AND u.suspended_at = 0`,
+    )
+    .get(tokenHash, now)
+}
+
 export function requireAuth(req, res, next) {
   const user = userForToken(bearerToken(req))
   if (!user) {

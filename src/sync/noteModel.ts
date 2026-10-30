@@ -15,6 +15,7 @@ export interface NoteMetaValues {
   createdAt: number
   updatedAt: number
   ownerId: string
+  parentId: string | null
 }
 
 export interface BlockSeed {
@@ -60,6 +61,10 @@ export function noteMeta(doc: Y.Doc): NoteMetaValues {
     createdAt: Number(meta.get('createdAt')) || Date.now(),
     updatedAt: Number(meta.get('updatedAt')) || Date.now(),
     ownerId: typeof meta.get('ownerId') === 'string' ? (meta.get('ownerId') as string) : '',
+    parentId:
+      typeof meta.get('parentId') === 'string' && meta.get('parentId')
+        ? (meta.get('parentId') as string)
+        : null,
   }
 }
 
@@ -225,6 +230,7 @@ export function seedDocument(
     title: string
     tags: string[]
     due: string | null
+    parentId?: string | null
     blocks: BlockSeed[]
   },
 ): void {
@@ -239,6 +245,7 @@ export function seedDocument(
     meta.set('createdAt', now)
     meta.set('updatedAt', now)
     meta.set('ownerId', values.ownerId)
+    meta.set('parentId', values.parentId ?? null)
     const blocks = blockArray(doc)
     for (const seed of values.blocks) {
       const block = new Y.Map<unknown>()

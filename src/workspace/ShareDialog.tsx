@@ -3,7 +3,7 @@ import { Modal } from '../components/Modal'
 import { TrashIcon } from '../components/Icons'
 import { api } from '../lib/api'
 import { colorFor, initials } from '../lib/notes'
-import type { Member, NoteSummary } from '../lib/types'
+import type { Member, NoteSummary, Role } from '../lib/types'
 
 interface UserResult {
   userId: string
@@ -19,7 +19,9 @@ interface ShareDialogProps {
   error: string | null
   currentUserId: string
   token: string | null
-  onInvite: (userId: string) => Promise<void>
+  onInvite: (userId: string, role: Exclude<Role, 'owner'>) => Promise<void>
+  onChangeRole: (userId: string, role: Exclude<Role, 'owner'>) => Promise<void>
+  onTogglePublic: (enabled: boolean) => Promise<void>
   onRemove: (userId: string) => Promise<void>
   onLeave: () => Promise<void>
 }
@@ -34,6 +36,8 @@ export function ShareDialog({
   currentUserId,
   token,
   onInvite,
+  onChangeRole,
+  onTogglePublic,
   onRemove,
   onLeave,
 }: ShareDialogProps) {
@@ -42,9 +46,13 @@ export function ShareDialog({
   const [searching, setSearching] = useState(false)
   const [active, setActive] = useState(-1)
   const [busy, setBusy] = useState(false)
+  const [role, setRole] = useState<Exclude<Role, 'owner'>>('editor')
+  const [publicBusy, setPublicBusy] = useState(false)
+  const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
 
   const isOwner = note.role === 'owner'
+  const publicUrl = note.publicToken ? `${window.location.origin}/p/${note.publicToken}` : null
   const trimmed = query.trim()
 
   useEffect(() => {
@@ -53,6 +61,9 @@ export function ShareDialog({
       setResults([])
       setActive(-1)
       setSearching(false)
+      setRole('editor')
+      setPublicBusy(false)
+      setCopyMessage(null)
       setLocalError(null)
       setBusy(false)
     }
@@ -104,7 +115,7 @@ export function ShareDialog({
     setBusy(true)
     setLocalError(null)
     try {
-      await onInvite(userId)
+      await onInvite(userId, role)
       setQuery('')
       setResults([])
       setActive(-1)
@@ -118,8 +129,8 @@ export function ShareDialog({
   return (
     <Modal open={open} title="Share this note" onClose={onClose} size="sm">
       <p className="modal__lede">
-        Everyone listed here can open and edit this note at the same time. Search by name or 8-digit
-        ID to invite someone — no need to remember the number.
+        Invite people by name or 8-digit ID. Editors write together in realtime; viewers can read
+        and comment without changing the note.
       </p>
 
       {isOwner ? (
@@ -166,6 +177,15 @@ export function ShareDialog({
                 }
               }}
             />
+            <select
+              className="input share-role"
+              value={role}
+              onChange={(event) => setRole(event.target.value === 'viewer' ? 'viewer' : 'editor')}
+              aria-label="Role for invited person"
+            >
+              <option value="editor">Can edit</option>
+              <option value="viewer">Can view</option>
+            </select>
             <button
               type="button"
               className="btn btn--primary"
@@ -239,7 +259,27 @@ export function ShareDialog({
               </span>
               <span className="member__id mono">{member.userId}</span>
             </div>
-            <span className="member__role">{member.role}</span>
+            {isOwner && member.role !== 'owner' ? (
+              <select
+                className="input member__role member__role-select"
+                value={member.role === 'viewer' ? 'viewer' : 'editor'}
+                onChange={(event) => {
+                  const nextRole = event.target.value === 'viewer' ? 'viewer' : 'editor'
+                  setLocalError(null)
+                  void onChangeRole(member.userId, nextRole).catch((caught) => {
+                    setLocalError(
+                      caught instanceof Error ? caught.message : 'Could not change that role.',
+                    )
+                  })
+                }}
+                aria-label={`Role for ${member.displayName}`}
+              >
+                <option value="editor">Editor</option>
+                <option value="viewer">Viewer</option>
+              </select>
+            ) : (
+              <span className="member__role">{member.role}</span>
+            )}
             {isOwner && member.role !== 'owner' ? (
               <button
                 type="button"
@@ -254,6 +294,62 @@ export function ShareDialog({
           </div>
         ))}
       </div>
+
+      {isOwner ? (
+        <section className="public-share">
+          <div className="public-share__head">
+            <div>
+              <h3>Public read-only link</h3>
+              <p className="muted">
+                Anyone with the link can read this note. They cannot edit, comment or see other
+                notes.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={publicBusy}
+              onClick={async () => {
+                setPublicBusy(true)
+                setLocalError(null)
+                try {
+                  await onTogglePublic(!publicUrl)
+                } catch (caught) {
+                  setLocalError(
+                    caught instanceof Error ? caught.message : 'Could not update the public link.',
+                  )
+                } finally {
+                  setPublicBusy(false)
+                }
+              }}
+            >
+              {publicBusy ? 'Updating…' : publicUrl ? 'Turn off link' : 'Create link'}
+            </button>
+          </div>
+          {publicUrl ? (
+            <div className="public-share__link">
+              <input className="input" readOnly value={publicUrl} aria-label="Public note link" />
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => {
+                  if (!navigator.clipboard?.writeText) {
+                    setCopyMessage('Select the link above to copy it')
+                    return
+                  }
+                  void navigator.clipboard
+                    .writeText(publicUrl)
+                    .then(() => setCopyMessage('Copied'))
+                    .catch(() => setCopyMessage('Select the link above to copy it'))
+                }}
+              >
+                Copy
+              </button>
+            </div>
+          ) : null}
+          {copyMessage ? <p className="muted">{copyMessage}</p> : null}
+        </section>
+      ) : null}
 
       {!isOwner ? (
         <button type="button" className="btn btn--ghost btn--full" onClick={() => void onLeave()}>

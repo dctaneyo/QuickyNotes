@@ -1,3 +1,4 @@
+import * as Y from 'yjs'
 import { db } from './db.js'
 import { pushNoteHistory } from './events.js'
 
@@ -194,6 +195,108 @@ function flush(key) {
   } catch (error) {
     console.error('[history] could not record note', entry.noteId, error.message)
   }
+}
+
+function blockFromChange(change) {
+  return {
+    id: change.blockId,
+    index: change.index ?? 0,
+    type: change.beforeType ?? 'text',
+    text: change.before ?? '',
+    checked: change.beforeChecked === true,
+    indent: change.beforeIndent ?? 0,
+    format: change.beforeFormat ?? null,
+  }
+}
+
+function insertSnapshotBlock(blocks, block) {
+  const at = Math.min(Math.max(block.index ?? blocks.length, 0), blocks.length)
+  blocks.splice(at, 0, block)
+}
+
+/** Walk newer changes backwards to recover the note after one history entry. */
+export function snapshotAtHistoryEntry(noteId, entryId, currentDoc) {
+  const rows = db
+    .prepare(
+      `SELECT id, changes FROM note_history
+       WHERE note_id = ? ORDER BY created_at DESC, id DESC LIMIT 200`,
+    )
+    .all(noteId)
+  const selectedIndex = rows.findIndex((row) => row.id === entryId)
+  if (selectedIndex < 0) return null
+
+  const state = noteSnapshot(currentDoc)
+  state.blocks = state.blocks.map((block) => ({ ...block, format: { ...block.format } }))
+
+  for (let rowIndex = 0; rowIndex < selectedIndex; rowIndex += 1) {
+    let changes = []
+    try {
+      const parsed = JSON.parse(rows[rowIndex].changes)
+      if (Array.isArray(parsed)) changes = parsed
+    } catch {
+      changes = []
+    }
+    for (const change of changes) {
+      if (change.field === 'title') {
+        state.title = String(change.before ?? '')
+        continue
+      }
+      if (change.kind === 'added') {
+        state.blocks = state.blocks.filter((block) => block.id !== change.blockId)
+        continue
+      }
+      if (change.kind === 'removed') {
+        if (!state.blocks.some((block) => block.id === change.blockId)) {
+          insertSnapshotBlock(state.blocks, blockFromChange(change))
+        }
+        continue
+      }
+      const existing = state.blocks.find((block) => block.id === change.blockId)
+      if (existing) {
+        existing.text = change.before ?? ''
+        existing.type = change.beforeType ?? existing.type
+        existing.checked = change.beforeChecked === true
+        existing.indent = change.beforeIndent ?? 0
+        if (change.beforeFormat !== undefined) existing.format = change.beforeFormat ?? null
+      } else {
+        insertSnapshotBlock(state.blocks, blockFromChange(change))
+      }
+    }
+  }
+  return state
+}
+
+function setBlockFormat(block, format) {
+  if (!format) return
+  for (const key of ['bold', 'italic', 'underline', 'strike']) {
+    if (format[key] === true) block.set(key, true)
+  }
+  if (format.fontSize) block.set('fontSize', format.fontSize)
+  if (format.color) block.set('color', format.color)
+  if (format.highlight) block.set('highlight', format.highlight)
+}
+
+/** Replace a live note's content with a recovered snapshot in one Yjs update. */
+export function applyHistorySnapshot(doc, snapshot) {
+  const meta = doc.getMap('meta')
+  const blocks = doc.getArray('blocks')
+  doc.transact(() => {
+    meta.set('title', snapshot.title)
+    meta.set('updatedAt', Date.now())
+    blocks.delete(0, blocks.length)
+    for (const item of snapshot.blocks) {
+      const block = new Y.Map()
+      blocks.push([block])
+      block.set('id', item.id)
+      block.set('type', item.type)
+      block.set('indent', item.indent ?? 0)
+      block.set('checked', item.checked === true)
+      setBlockFormat(block, item.format)
+      const text = new Y.Text()
+      if (item.text) text.insert(0, item.text)
+      block.set('text', text)
+    }
+  }, 'history-restore')
 }
 
 /**

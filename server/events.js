@@ -116,6 +116,30 @@ export function pushNotesForNote(noteId) {
   pushNotes(noteAudience(noteId))
 }
 
+/** One note's comments changed; only its audience needs to refetch. */
+export function pushComments(noteId) {
+  const audience = new Set(noteAudience(noteId))
+  if (audience.size === 0) return
+  const payload = JSON.stringify({ type: 'comments:changed', noteId })
+  for (const ws of subscribers) {
+    if (ws.user?.userId && audience.has(ws.user.userId) && ws.readyState === 1) {
+      ws.send(payload)
+    }
+  }
+}
+
+/** Tell mentioned people to refresh their mention inbox. */
+export function pushMentions(userIds) {
+  const audience = new Set(userIds)
+  if (audience.size === 0) return
+  const payload = JSON.stringify({ type: 'mentions:changed' })
+  for (const ws of subscribers) {
+    if (ws.user?.userId && audience.has(ws.user.userId) && ws.readyState === 1) {
+      ws.send(payload)
+    }
+  }
+}
+
 /** One note's history changed; only its audience needs to refetch. */
 export function pushNoteHistory(noteId) {
   const audience = new Set(noteAudience(noteId))

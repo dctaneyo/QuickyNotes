@@ -110,9 +110,13 @@ db.exec(`
     updated_at INTEGER NOT NULL,
     content    BLOB,
     text       TEXT NOT NULL DEFAULT '',
-    tags       TEXT NOT NULL DEFAULT '[]'
+    tags       TEXT NOT NULL DEFAULT '[]',
+    parent_id  TEXT,
+    public_token TEXT
   ) STRICT;
   CREATE INDEX IF NOT EXISTS notes_owner ON notes(owner_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS notes_public_token
+    ON notes(public_token) WHERE public_token IS NOT NULL;
   CREATE INDEX IF NOT EXISTS notes_updated ON notes(updated_at DESC);
 
   CREATE TABLE IF NOT EXISTS note_members (
@@ -129,6 +133,25 @@ db.exec(`
     password_hash TEXT,
     locked_at     INTEGER NOT NULL
   ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS note_comments (
+    id         TEXT PRIMARY KEY,
+    note_id    TEXT NOT NULL REFERENCES notes(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    author_id  TEXT NOT NULL,
+    author_name TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    resolved_at INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  ) STRICT;
+  CREATE INDEX IF NOT EXISTS note_comments_note ON note_comments(note_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS comment_mentions (
+    comment_id TEXT NOT NULL REFERENCES note_comments(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(user_id) ON UPDATE CASCADE ON DELETE CASCADE,
+    read_at    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (comment_id, user_id)
+  ) STRICT;
+  CREATE INDEX IF NOT EXISTS comment_mentions_user ON comment_mentions(user_id, read_at);
 
   CREATE TABLE IF NOT EXISTS note_history (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,6 +207,15 @@ if (!noteColumns.includes('tags')) {
 }
 if (!noteColumns.includes('trashed_at')) {
   db.exec('ALTER TABLE notes ADD COLUMN trashed_at INTEGER NOT NULL DEFAULT 0')
+}
+if (!noteColumns.includes('parent_id')) {
+  db.exec('ALTER TABLE notes ADD COLUMN parent_id TEXT')
+}
+if (!noteColumns.includes('public_token')) {
+  db.exec('ALTER TABLE notes ADD COLUMN public_token TEXT')
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS notes_public_token ON notes(public_token) WHERE public_token IS NOT NULL',
+  )
 }
 // Notes trashed before this column existed start their countdown from their
 // last edit, which is the closest honest estimate available.

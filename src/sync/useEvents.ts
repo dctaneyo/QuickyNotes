@@ -8,6 +8,8 @@ export type RealtimeEvent =
   | { type: 'notes:snapshot'; notes: NoteSummary[] }
   | { type: 'templates:snapshot'; templates: CustomTemplate[] }
   | { type: 'history:changed'; noteId: string }
+  | { type: 'comments:changed'; noteId: string }
+  | { type: 'mentions:changed' }
   | ({ type: 'admin:snapshot' } & AdminSnapshot)
 
 type Listener = (event: RealtimeEvent) => void
@@ -77,8 +79,9 @@ export function useEvents(token: string | null): Realtime {
       socket.onclose = (event) => {
         socketRef.current = null
         if (disposed) return
-        if (event.code === 4001) {
-          // The account was suspended or deleted; stop reconnecting.
+        if (event.code === 4001 || event.code === 4401) {
+          // The account was suspended or the session was revoked; stop
+          // reconnecting until the user signs in again.
           setStatus('offline')
           return
         }

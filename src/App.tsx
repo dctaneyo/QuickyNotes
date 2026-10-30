@@ -1,6 +1,7 @@
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { MobileInputKeyboard } from './components/keyboard/MobileInputKeyboard'
 import { AuthScreen } from './screens/AuthScreen'
+import { PublicNoteScreen } from './screens/PublicNoteScreen'
 import { WorkspaceScreen } from './workspace/WorkspaceScreen'
 
 function Gate() {
@@ -22,6 +23,16 @@ function Gate() {
 }
 
 export default function App() {
+  const publicMatch = window.location.pathname.match(/^\/p\/([A-Za-z0-9]+)\/?$/)
+  if (publicMatch) {
+    return (
+      <>
+        <PublicNoteScreen shareToken={publicMatch[1]} />
+        <MobileInputKeyboard />
+      </>
+    )
+  }
+
   return (
     <AuthProvider>
       <Gate />

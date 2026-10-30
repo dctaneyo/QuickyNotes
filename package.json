@@ -12,6 +12,7 @@
     "dev:server": "node --watch server/index.js",
     "dev:web": "vite",
     "build": "tsc -b && vite build",
+    "test": "node --test test/*.test.js",
     "start": "node server/index.js",
     "lint": "oxlint"
   },

@@ -10,14 +10,19 @@ import {
   todayKey,
   uid,
 } from '../lib/notes'
-import type { Filter, Member, NoteSummary, ViewId } from '../lib/types'
+import type { Filter, Member, NoteSummary, Role, ViewId } from '../lib/types'
 import { encodeSeed, blockViews, noteMeta } from '../sync/noteModel'
 import { useNoteSync } from '../sync/useNoteSync'
 import { useLobby } from '../sync/useLobby'
 import { useEvents } from '../sync/useEvents'
 import { putSeed } from '../sync/seeds'
 import { useNoteIndex } from '../hooks/useNoteIndex'
-import type { CustomTemplate, NoteTemplate, TemplateDraft } from '../lib/templates'
+import { useMentions } from '../hooks/useMentions'
+import { templateById, type CustomTemplate, type NoteTemplate, type TemplateDraft } from '../lib/templates'
+import type { TransferNote } from '../lib/transfer'
+import { DailyReviewDialog } from './DailyReviewDialog'
+import { MentionsDialog } from './MentionsDialog'
+import { TransferDialog } from './TransferDialog'
 import { Sidebar } from './Sidebar'
 import { NoteList } from './NoteList'
 import { NoteEditor } from './NoteEditor'
@@ -48,6 +53,7 @@ export function WorkspaceScreen() {
   const events = useEvents(token)
   const index = useNoteIndex(token, user?.userId ?? null, events)
   const lobby = useLobby(token, user?.userId ?? null, user?.displayName ?? null)
+  const mentions = useMentions(token, events.subscribe)
 
   const [filter, setFilter] = useState<Filter>({ kind: 'view', id: 'today' })
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -60,6 +66,9 @@ export function WorkspaceScreen() {
   const [adminOpen, setAdminOpen] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<NoteSummary | null>(null)
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [mentionsOpen, setMentionsOpen] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
   const searchRef = useRef<HTMLInputElement>(null)
@@ -157,6 +166,39 @@ export function WorkspaceScreen() {
     }
   }, [notes])
 
+  const parent = selected?.parentId
+    ? notes.find((note) => note.id === selected.parentId && !note.trashed) ?? null
+    : null
+  const subpages = selected
+    ? notes.filter((note) => note.parentId === selected.id && !note.trashed).sort(sortNotes)
+    : []
+  const backlinks = useMemo(() => {
+    if (!selected) return []
+    const title = effectiveTitle(selected).toLowerCase()
+    if (!title) return []
+    return notes.filter((note) => {
+      if (note.id === selected.id || note.trashed) return false
+      const text = note.text.toLowerCase()
+      return text.includes(`[[${title}]]`) || text.includes(`[[${selected.id.toLowerCase()}]]`)
+    })
+  }, [notes, selected])
+  const outboundLinks = useMemo(() => {
+    if (!selected) return []
+    const matches = [...selected.text.matchAll(/\[\[([^\]]+)\]\]/g)]
+    const ids = new Set<string>()
+    for (const match of matches) {
+      const token = match[1].trim().toLowerCase()
+      const found = notes.find(
+        (note) =>
+          !note.trashed &&
+          note.id !== selected.id &&
+          (note.id.toLowerCase() === token || effectiveTitle(note).toLowerCase() === token),
+      )
+      if (found) ids.add(found.id)
+    }
+    return notes.filter((note) => ids.has(note.id))
+  }, [notes, selected])
+
   const tags = useMemo(() => {
     const counter = new Map<string, number>()
     for (const note of notes) {
@@ -203,7 +245,7 @@ export function WorkspaceScreen() {
     setDrawerOpen(false)
   }
 
-  const createNote = (template: NoteTemplate) => {
+  const createNote = (template: NoteTemplate, parentId: string | null = null) => {
     if (!user) return
     const id = uid()
     const due = todayKey()
@@ -213,6 +255,7 @@ export function WorkspaceScreen() {
       title,
       tags: template.tags,
       due,
+      parentId,
       blocks: template.blocks,
     })
     putSeed(id, update)
@@ -231,6 +274,7 @@ export function WorkspaceScreen() {
       ownerName: user.displayName,
       role: 'owner',
       memberCount: 1,
+      parentId,
       text: template.blocks.map((block) => block.text).join('\n'),
       pending: true,
     })
@@ -239,7 +283,60 @@ export function WorkspaceScreen() {
     setTemplateEditing(null)
     setTemplateOpen(false)
     setDrawerOpen(false)
-    showToast(template.name === 'Blank note' ? 'New note' : `${template.name} created`)
+    showToast(
+      parentId
+        ? 'Subpage created'
+        : template.name === 'Blank note'
+          ? 'New note'
+          : `${template.name} created`,
+    )
+  }
+
+  const createSubpage = () => {
+    if (!selected) return
+    createNote(templateById('blank'), selected.id)
+  }
+
+  const importNotes = async (incoming: TransferNote[]) => {
+    if (!user) throw new Error('Sign in again to import notes.')
+    const firstId = uid()
+    let first = true
+    for (const item of incoming) {
+      const id = first ? firstId : uid()
+      first = false
+      const due = item.due || todayKey()
+      const now = Date.now()
+      putSeed(
+        id,
+        encodeSeed({
+          ownerId: user.userId,
+          title: item.title,
+          tags: item.tags,
+          due,
+          parentId: null,
+          blocks: item.blocks.length ? item.blocks : [{ type: 'text', text: '' }],
+        }),
+      )
+      await index.registerNote({
+        id,
+        title: item.title,
+        due,
+        tags: item.tags,
+        starred: false,
+        trashed: false,
+        createdAt: now,
+        updatedAt: now,
+        ownerId: user.userId,
+        ownerName: user.displayName,
+        role: 'owner',
+        memberCount: 1,
+        parentId: null,
+        text: item.blocks.map((block) => block.text).join('\n'),
+        pending: true,
+      })
+    }
+    setFilter({ kind: 'view', id: 'all' })
+    setSelectedId(firstId)
   }
 
   const capture = (text: string) => {
@@ -372,6 +469,11 @@ export function WorkspaceScreen() {
     index.updateSummary({ ...selected, locked: false, lockProtected: false })
   }
 
+  const releaseNoteUnlock = async () => {
+    if (!selected || !token) return
+    await api(`/api/notes/${selected.id}/unlock`, { method: 'DELETE', token })
+  }
+
   const emptyTrash = async () => {
     try {
       await index.emptyTrash()
@@ -397,19 +499,47 @@ export function WorkspaceScreen() {
     showToast(target.role === 'owner' ? 'Permanently deleted' : 'Removed from your trash')
   }
 
-  const invite = async (userId: string) => {
+  const invite = async (userId: string, role: Exclude<Role, 'owner'>) => {
     if (!selected || !token) return
     const result = await api<{ members: Member[] }>(`/api/notes/${selected.id}/members`, {
       method: 'POST',
       token,
-      body: { userId },
+      body: { userId, role },
     })
     index.updateSummary({
       ...selected,
       memberCount: result.members.length,
       members: result.members,
     })
-    showToast('Invited to this note')
+    showToast(role === 'viewer' ? 'Invited as a viewer' : 'Invited to this note')
+  }
+
+  const changeRole = async (userId: string, role: Exclude<Role, 'owner'>) => {
+    if (!selected || !token) return
+    const result = await api<{ members: Member[] }>(
+      `/api/notes/${selected.id}/members/${userId}`,
+      { method: 'PATCH', token, body: { role } },
+    )
+    index.updateSummary({ ...selected, members: result.members })
+    showToast(role === 'viewer' ? 'Changed to viewer' : 'Changed to editor')
+  }
+
+  const togglePublic = async (enabled: boolean) => {
+    if (!selected || !token) return
+    const result = await api<{ enabled: boolean; publicToken: string | null }>(
+      `/api/notes/${selected.id}/public`,
+      { method: 'POST', token, body: { enabled } },
+    )
+    index.updateSummary({ ...selected, publicToken: result.publicToken })
+    showToast(enabled ? 'Public link created' : 'Public link turned off')
+  }
+
+  const openFromAnywhere = (id: string) => {
+    setFilter({ kind: 'view', id: 'all' })
+    setSelectedId(id)
+    setReviewOpen(false)
+    setMentionsOpen(false)
+    setDrawerOpen(false)
   }
 
   const removeMember = async (userId: string) => {
@@ -450,9 +580,16 @@ export function WorkspaceScreen() {
         user={user!}
         peers={lobby.peers}
         syncing={index.syncing}
+        mentionCount={mentions.unread}
         onFilter={changeFilter}
         onSelectDay={(date) => {
           changeFilter({ kind: 'day', date })
+        }}
+        onMentions={() => setMentionsOpen(true)}
+        onReview={() => setReviewOpen(true)}
+        onTransfer={() => {
+          setTransferOpen(true)
+          setDrawerOpen(false)
         }}
         onNew={() => setTemplateOpen(true)}
         onSettings={openSettings}
@@ -507,10 +644,20 @@ export function WorkspaceScreen() {
             peers={sync.peers}
             status={sync.status}
             synced={sync.synced}
+            saveState={sync.saveState}
+            savedAt={sync.savedAt}
             setCursor={sync.setCursor}
             retry={sync.retry}
             members={members}
             token={token}
+            currentUserId={user?.userId ?? ''}
+            backlinks={backlinks}
+            outboundLinks={outboundLinks}
+            linkTargets={notes.filter((note) => !note.trashed)}
+            parentTitle={parent ? effectiveTitle(parent) : null}
+            subpages={subpages}
+            onOpenNote={openFromAnywhere}
+            onCreateSubpage={createSubpage}
             historyEvents={events}
             tagSuggestions={tags.map((tag) => tag.name)}
             onSummaryChange={index.updateSummary}
@@ -523,6 +670,7 @@ export function WorkspaceScreen() {
             onLock={lockNote}
             onUnlock={unlockNote}
             onRemoveLock={removeNoteLock}
+            onReleaseUnlock={releaseNoteUnlock}
             autoFocus={
               !selected.trashed && !selected.locked && autoFocusRef.current === selected.id
             }
@@ -589,6 +737,8 @@ export function WorkspaceScreen() {
           currentUserId={user?.userId ?? ''}
           token={token}
           onInvite={invite}
+          onChangeRole={changeRole}
+          onTogglePublic={togglePublic}
           onRemove={removeMember}
           onLeave={leaveNote}
         />
@@ -616,6 +766,39 @@ export function WorkspaceScreen() {
         confirmLabel="Permanently delete"
         onConfirm={confirmDelete}
         onClose={() => setPendingDelete(null)}
+      />
+
+      <DailyReviewDialog
+        open={reviewOpen}
+        notes={notes}
+        onClose={() => setReviewOpen(false)}
+        onOpenNote={openFromAnywhere}
+        onNewDaily={() => {
+          createNote(templateById('daily'))
+          setReviewOpen(false)
+        }}
+      />
+
+      <MentionsDialog
+        open={mentionsOpen}
+        onClose={() => setMentionsOpen(false)}
+        mentions={mentions.mentions}
+        notes={notes}
+        loading={mentions.loading}
+        error={mentions.error}
+        onOpenNote={openFromAnywhere}
+        onMarkRead={mentions.markRead}
+        onRefresh={mentions.refresh}
+      />
+
+      <TransferDialog
+        open={transferOpen}
+        onClose={() => setTransferOpen(false)}
+        note={selected}
+        doc={sync.doc}
+        token={token}
+        onImport={importNotes}
+        onToast={showToast}
       />
 
       <SettingsDialog
