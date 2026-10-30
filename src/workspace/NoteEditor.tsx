@@ -7,7 +7,7 @@ import {
   type CSSProperties,
 } from 'react'
 import * as Y from 'yjs'
-import type { Member, NoteSummary, Role, SyncState } from '../lib/types'
+import type { Member, MemberPermissions, NoteSummary, SyncState } from '../lib/types'
 import {
   BLOCK_LABELS,
   dateKey,
@@ -18,6 +18,7 @@ import {
   initials,
   normalizeTag,
   noteDay,
+  notePermissions,
 } from '../lib/notes'
 import {
   applyBlockFormat,
@@ -100,7 +101,7 @@ interface NoteEditorProps {
   onSummaryChange: (summary: NoteSummary) => void
   onSaveTemplate: (draft: TemplateDraft) => Promise<void>
   onShare: () => void
-  onInvite: (userId: string, role: Exclude<Role, 'owner'>) => Promise<void>
+  onInvite: (userId: string, permissions: MemberPermissions) => Promise<void>
   onDeleteForever: () => void
   onDuplicate: () => void
   onBack: () => void
@@ -197,10 +198,11 @@ export function NoteEditor({
   const isTrashed = meta.trashed
   const isLocked = summary.locked === true
   const lockProtected = summary.lockProtected === true
+  const permissions = notePermissions(summary)
   const isOwner = summary.role === 'owner'
-  const isViewer = summary.role === 'viewer'
-  const readOnly = isTrashed || isViewer || (isLocked && !unlocked)
-  const canComment = !isTrashed
+  const isViewer = !permissions.edit
+  const readOnly = isTrashed || !permissions.edit || (isLocked && !unlocked)
+  const canComment = !isTrashed && permissions.comment
   const wasLockedRef = useRef(isLocked)
   const noteDate = meta.due ?? dateKey(new Date(meta.createdAt))
   const dayName = dayLabel(noteDate)
@@ -801,7 +803,7 @@ export function NoteEditor({
             </div>
           ) : null}
 
-          {canComment ? (
+          {!isTrashed ? (
             <button
               type="button"
               className={`icon-btn${commentsOpen ? ' is-on' : ''}`}
@@ -862,27 +864,29 @@ export function NoteEditor({
 
           {isTrashed ? (
             <>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={restoreNote}
-                aria-label="Restore from trash"
-                title="Restore from trash"
-              >
-                <RestoreIcon size={18} />
-              </button>
+              {isOwner ? (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={restoreNote}
+                  aria-label="Restore from trash"
+                  title="Restore from trash"
+                >
+                  <RestoreIcon size={18} />
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="icon-btn icon-btn--danger"
                 onClick={onDeleteForever}
-                aria-label="Permanently delete note"
+                aria-label={isOwner ? 'Permanently delete note' : 'Remove from my trash'}
                 aria-haspopup="dialog"
-                title="Permanently delete"
+                title={isOwner ? 'Permanently delete' : 'Remove from my trash'}
               >
                 <TrashIcon size={18} />
               </button>
             </>
-          ) : readOnly || historyOpen ? null : (
+          ) : readOnly || historyOpen || !isOwner ? null : (
             <button
               type="button"
               className="icon-btn icon-btn--danger"
@@ -1023,7 +1027,11 @@ export function NoteEditor({
 
       {isViewer && !isTrashed ? (
         <div className="banner banner--viewer">
-          <span>You are viewing this note read-only. You can still leave comments.</span>
+          <span>
+            {permissions.comment
+              ? 'You are viewing this note read-only. You can still leave comments.'
+              : 'You are viewing this note read-only. Commenting is turned off for you.'}
+          </span>
         </div>
       ) : null}
 
@@ -1080,12 +1088,15 @@ export function NoteEditor({
       {isTrashed ? (
         <div className="banner banner--trash">
           <span>
-            This note is in the trash and is read-only. Restore it to edit, star or share it. It is
-            deleted automatically 10 days after trashing.
+            {isOwner
+              ? 'This note is in the trash and is read-only. Restore it to edit, star or share it. It is deleted automatically 10 days after trashing.'
+              : 'The owner moved this note to the trash. Only the owner can restore it.'}
           </span>
-          <button type="button" className="link" onClick={restoreNote}>
-            Restore it
-          </button>
+          {isOwner ? (
+            <button type="button" className="link" onClick={restoreNote}>
+              Restore it
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -1430,6 +1441,7 @@ export function NoteEditor({
         loading={comments.loading}
         error={comments.error}
         busy={comments.busy}
+        canComment={canComment}
         onAdd={comments.add}
         onInvite={onInvite}
         onResolve={comments.resolve}

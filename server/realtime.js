@@ -32,9 +32,15 @@ let activityHandler = () => {}
  * change. It may return a close code when read access is gone.
  */
 let connectionAuthorizer = () => ({ read: true, write: true })
+let updateAuthorizer = () => true
 
 export function setConnectionAuthorizer(handler) {
   connectionAuthorizer = handler
+}
+
+/** Validate the contents of a write before it is merged into the live room. */
+export function setUpdateAuthorizer(handler) {
+  updateAuthorizer = handler
 }
 
 /** Let the HTTP layer mirror live-room counts into the admin snapshot. */
@@ -334,14 +340,15 @@ export function attachConnection(conn, room) {
           syncType === syncProtocol.messageYjsSyncStep2 ||
           syncType === syncProtocol.messageYjsUpdate
         ) {
-          if (!current.write) {
-            // Do not silently accept an edit the note's lock forbids. Closing
-            // makes the provider reconnect in read-only mode instead of
-            // leaving the user with an editor that looks saved but is not.
+          const update = decoding.readVarUint8Array(decoder)
+          if (!current.write || !updateAuthorizer(conn, entry.doc, update)) {
+            // Do not silently accept an edit the note's permissions or lock
+            // forbid. Closing makes the provider reconnect in read-only mode
+            // instead of leaving an editor that looks saved but is not.
             conn.close(4003, 'Read-only note')
             return
           }
-          applyClientUpdate(entry, conn, decoding.readVarUint8Array(decoder))
+          applyClientUpdate(entry, conn, update)
         }
         return
       }

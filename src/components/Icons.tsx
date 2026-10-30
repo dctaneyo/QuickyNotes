@@ -200,6 +200,15 @@ export function MentionIcon(props: IconProps) {
   )
 }
 
+export function BellIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6.5 9.2a5.5 5.5 0 0 1 11 0c0 5.6 2 7.4 2 7.4h-15s2-1.8 2-7.4z" />
+      <path d="M9.6 19a2.7 2.7 0 0 0 4.8 0" />
+    </Svg>
+  )
+}
+
 export function ArrowLeftIcon(props: IconProps) {
   return (
     <Svg {...props}>

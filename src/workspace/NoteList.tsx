@@ -232,8 +232,12 @@ export function NoteList({
                       type="button"
                       className="icon-btn icon-btn--tiny icon-btn--danger"
                       onClick={() => onDeleteForever(note.id)}
-                      aria-label={`Permanently delete ${effectiveTitle(note)}`}
-                      title="Permanently delete"
+                      aria-label={
+                        note.role === 'owner'
+                          ? `Permanently delete ${effectiveTitle(note)}`
+                          : `Remove ${effectiveTitle(note)} from your trash`
+                      }
+                      title={note.role === 'owner' ? 'Permanently delete' : 'Remove from my trash'}
                     >
                       <TrashIcon size={16} />
                     </button>

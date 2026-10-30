@@ -45,6 +45,7 @@ import {
   restoreHistoricalVersion,
   roomStats,
   setConnectionAuthorizer,
+  setUpdateAuthorizer,
 } from './realtime.js'
 import {
   attachEvents,
@@ -299,18 +300,42 @@ app.get('/api/users/search', requireAuth, (req, res) => {
 
 // --------------------------------------------------------------- notes -------
 
+function permissionsFor(role, canComment) {
+  return {
+    edit: role === 'owner' || role === 'editor',
+    comment: role === 'owner' || canComment !== 0,
+  }
+}
+
 function accessFor(noteId, userId) {
   const row = db
     .prepare(
       `SELECT n.owner_id,
               CASE WHEN n.owner_id = ? THEN 'owner'
                    ELSE (SELECT role FROM note_members m WHERE m.note_id = n.id AND m.user_id = ?)
-              END AS role
+              END AS role,
+              (SELECT can_comment FROM note_members m
+               WHERE m.note_id = n.id AND m.user_id = ?) AS can_comment
        FROM notes n WHERE n.id = ?`,
     )
-    .get(userId, userId, noteId)
+    .get(userId, userId, userId, noteId)
   if (!row) return null
-  return { ownerId: row.owner_id, role: row.role ?? null }
+  return {
+    ownerId: row.owner_id,
+    role: row.role ?? null,
+    permissions: permissionsFor(row.role, row.can_comment),
+  }
+}
+
+function cleanMemberPermissions(body, fallback = { edit: true, comment: true }) {
+  const source =
+    body?.permissions && typeof body.permissions === 'object' ? body.permissions : null
+  const role = body?.role === 'viewer' ? 'viewer' : body?.role === 'editor' ? 'editor' : null
+  const edit =
+    typeof source?.edit === 'boolean' ? source.edit : role ? role === 'editor' : fallback.edit
+  const comment =
+    typeof source?.comment === 'boolean' ? source.comment : fallback.comment
+  return { role: edit ? 'editor' : 'viewer', canComment: comment ? 1 : 0 }
 }
 
 function parseTags(raw) {
@@ -475,6 +500,7 @@ function mapNote(row) {
     ownerId: row.owner_id,
     ownerName: row.owner_name,
     role: row.role,
+    permissions: permissionsFor(row.role, row.can_comment),
     memberCount: row.member_count ?? 1,
     locked: row.locked === 1,
     lockProtected: row.lock_protected === 1,
@@ -493,14 +519,24 @@ function membersOf(noteId) {
   if (!note) return []
   const rest = db
     .prepare(
-      `SELECT m.user_id, m.role, u.display_name
+      `SELECT m.user_id, m.role, m.can_comment, u.display_name
        FROM note_members m JOIN users u ON u.user_id = m.user_id
        WHERE m.note_id = ? ORDER BY u.display_name COLLATE NOCASE`,
     )
     .all(noteId)
   return [
-    { userId: note.owner_id, displayName: note.display_name, role: 'owner' },
-    ...rest.map((row) => ({ userId: row.user_id, displayName: row.display_name, role: row.role })),
+    {
+      userId: note.owner_id,
+      displayName: note.display_name,
+      role: 'owner',
+      permissions: { edit: true, comment: true },
+    },
+    ...rest.map((row) => ({
+      userId: row.user_id,
+      displayName: row.display_name,
+      role: row.role,
+      permissions: permissionsFor(row.role, row.can_comment),
+    })),
   ]
 }
 
@@ -509,6 +545,7 @@ function listNotesForUser(userId, query = '') {
   let sql = `
     SELECT n.*, u.display_name AS owner_name,
            CASE WHEN n.owner_id = ? THEN 'owner' ELSE m.role END AS role,
+           m.can_comment,
            1 + (SELECT COUNT(*) FROM note_members mc WHERE mc.note_id = n.id) AS member_count,
            (l.note_id IS NOT NULL) AS locked,
            (l.password_hash IS NOT NULL) AS lock_protected
@@ -526,7 +563,7 @@ function listNotesForUser(userId, query = '') {
   if (notes.length === 0) return notes
   const memberRows = db
     .prepare(
-      `SELECT m.note_id, m.user_id, m.role, u.display_name
+      `SELECT m.note_id, m.user_id, m.role, m.can_comment, u.display_name
        FROM note_members m JOIN users u ON u.user_id = m.user_id
        WHERE m.note_id IN (${notes.map(() => '?').join(',')})
        ORDER BY u.display_name COLLATE NOCASE`,
@@ -539,12 +576,18 @@ function listNotesForUser(userId, query = '') {
       userId: row.user_id,
       displayName: row.display_name,
       role: row.role,
+      permissions: permissionsFor(row.role, row.can_comment),
     })
   }
   return notes.map((note) => ({
     ...note,
     members: [
-      { userId: note.ownerId, displayName: note.ownerName, role: 'owner' },
+      {
+        userId: note.ownerId,
+        displayName: note.ownerName,
+        role: 'owner',
+        permissions: { edit: true, comment: true },
+      },
       ...(extras.get(note.id) ?? []),
     ],
   }))
@@ -583,20 +626,24 @@ function listComments(noteId) {
     .map(mapComment)
 }
 
-function mentionInbox(userId, limit = 40) {
+function notificationInbox(userId, limit = 40) {
   const rows = db
     .prepare(
-      `SELECT c.*, n.title, n.trashed, cm.read_at AS mention_read_at
-       FROM comment_mentions cm
-       JOIN note_comments c ON c.id = cm.comment_id
+      `SELECT c.*, n.title, n.trashed, cn.read_at AS notification_read_at,
+              EXISTS (
+                SELECT 1 FROM comment_mentions cm
+                WHERE cm.comment_id = c.id AND cm.user_id = ?
+              ) AS mentioned
+       FROM comment_notifications cn
+       JOIN note_comments c ON c.id = cn.comment_id
        JOIN notes n ON n.id = c.note_id
-       WHERE cm.user_id = ? AND n.trashed = 0
+       WHERE cn.user_id = ? AND n.trashed = 0
          AND (n.owner_id = ? OR EXISTS (
            SELECT 1 FROM note_members m WHERE m.note_id = n.id AND m.user_id = ?
          ))
        ORDER BY c.created_at DESC LIMIT ?`,
     )
-    .all(userId, userId, userId, limit)
+    .all(userId, userId, userId, userId, limit)
   return rows.map((row) => ({
     id: row.id,
     noteId: row.note_id,
@@ -605,7 +652,8 @@ function mentionInbox(userId, limit = 40) {
     authorName: row.author_name,
     body: row.body,
     createdAt: row.created_at,
-    readAt: row.mention_read_at ?? 0,
+    readAt: row.notification_read_at ?? 0,
+    mentioned: row.mentioned === 1,
   }))
 }
 
@@ -657,6 +705,10 @@ app.post('/api/notes/:id/comments', requireAuth, (req, res) => {
     res.status(404).json({ error: 'That note does not exist for you.' })
     return
   }
+  if (!access.permissions.comment) {
+    res.status(403).json({ error: 'The note owner has turned off comments for you.' })
+    return
+  }
   const body = typeof req.body?.body === 'string' ? req.body.body.trim() : ''
   if (!body) {
     res.status(400).json({ error: 'Write a comment first.' })
@@ -678,12 +730,18 @@ app.post('/api/notes/:id/comments', requireAuth, (req, res) => {
   ]
   const id = randomUUID()
   const now = Date.now()
+  const notifiedIds = [...allowed]
   db.exec('BEGIN')
   try {
     db.prepare(
       `INSERT INTO note_comments (id, note_id, author_id, author_name, body, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(id, req.params.id, req.user.user_id, req.user.display_name, body, now)
+    for (const userId of notifiedIds) {
+      db.prepare(
+        'INSERT INTO comment_notifications (comment_id, user_id) VALUES (?, ?)',
+      ).run(id, userId)
+    }
     for (const userId of mentionIds) {
       db.prepare('INSERT INTO comment_mentions (comment_id, user_id) VALUES (?, ?)').run(
         id,
@@ -696,7 +754,7 @@ app.post('/api/notes/:id/comments', requireAuth, (req, res) => {
     throw error
   }
   pushComments(req.params.id)
-  pushMentions(mentionIds)
+  pushMentions(notifiedIds)
   res.status(201).json({ comment: mapComment(db.prepare('SELECT * FROM note_comments WHERE id = ?').get(id)) })
 })
 
@@ -711,6 +769,10 @@ app.patch('/api/notes/:id/comments/:commentId', requireAuth, (req, res) => {
     .get(req.params.commentId, req.params.id)
   if (!row) {
     res.status(404).json({ error: 'That comment does not exist.' })
+    return
+  }
+  if (!access.permissions.comment) {
+    res.status(403).json({ error: 'The note owner has turned off comments for you.' })
     return
   }
   if (row.author_id !== req.user.user_id && access.role !== 'owner') {
@@ -739,23 +801,27 @@ app.delete('/api/notes/:id/comments/:commentId', requireAuth, (req, res) => {
     res.status(404).json({ error: 'That comment does not exist.' })
     return
   }
+  if (!access.permissions.comment) {
+    res.status(403).json({ error: 'The note owner has turned off comments for you.' })
+    return
+  }
   if (row.author_id !== req.user.user_id && access.role !== 'owner') {
     res.status(403).json({ error: 'Only the author or note owner can delete this comment.' })
     return
   }
-  const mentioned = db
-    .prepare('SELECT user_id FROM comment_mentions WHERE comment_id = ?')
+  const notified = db
+    .prepare('SELECT user_id FROM comment_notifications WHERE comment_id = ?')
     .all(row.id)
     .map((entry) => entry.user_id)
   db.prepare('DELETE FROM note_comments WHERE id = ?').run(row.id)
   pushComments(req.params.id)
-  pushMentions(mentioned)
+  pushMentions(notified)
   res.json({ ok: true })
 })
 
 app.get('/api/mentions', requireAuth, (req, res) => {
   res.set('Cache-Control', 'no-store')
-  const mentions = mentionInbox(req.user.user_id)
+  const mentions = notificationInbox(req.user.user_id)
   res.json({ mentions, unread: mentions.filter((mention) => !mention.readAt).length })
 })
 
@@ -765,19 +831,13 @@ app.post('/api/mentions/read', requireAuth, (req, res) => {
     : []
   if (ids.length === 0) {
     db.prepare(
-      `UPDATE comment_mentions SET read_at = ?
-       WHERE user_id = ? AND read_at = 0 AND comment_id IN (
-         SELECT id FROM note_comments WHERE note_id IN (
-           SELECT id FROM notes WHERE owner_id = ? OR id IN (
-             SELECT note_id FROM note_members WHERE user_id = ?
-           )
-         )
-       )`,
-    ).run(Date.now(), req.user.user_id, req.user.user_id, req.user.user_id)
+      'UPDATE comment_notifications SET read_at = ? WHERE user_id = ? AND read_at = 0',
+    ).run(Date.now(), req.user.user_id)
   } else {
     const placeholders = ids.map(() => '?').join(',')
     db.prepare(
-      `UPDATE comment_mentions SET read_at = ? WHERE user_id = ? AND comment_id IN (${placeholders})`,
+      `UPDATE comment_notifications SET read_at = ?
+       WHERE user_id = ? AND comment_id IN (${placeholders})`,
     ).run(Date.now(), req.user.user_id, ...ids)
   }
   res.json({ ok: true })
@@ -872,7 +932,12 @@ app.get('/api/notes/:id', requireAuth, (req, res) => {
     )
     .get(req.params.id)
   res.json({
-    note: mapNote({ ...row, role: access.role, member_count: membersOf(row.id).length }),
+    note: mapNote({
+      ...row,
+      role: access.role,
+      can_comment: access.permissions.comment ? 1 : 0,
+      member_count: membersOf(row.id).length,
+    }),
     members: membersOf(row.id),
   })
 })
@@ -913,7 +978,7 @@ app.get('/api/notes/:id/history', requireAuth, (req, res) => {
 
 app.post('/api/notes/:id/history/:entryId/restore', requireAuth, (req, res) => {
   const access = accessFor(req.params.id, req.user.user_id)
-  if (!access?.role || access.role === 'viewer') {
+  if (!access?.permissions.edit) {
     res.status(403).json({ error: 'You do not have permission to restore this note.' })
     return
   }
@@ -1005,7 +1070,7 @@ app.delete('/api/notes/:id', requireAuth, (req, res) => {
   if (access.role !== 'owner') {
     const row = db.prepare('SELECT trashed FROM notes WHERE id = ?').get(req.params.id)
     if (row?.trashed !== 1) {
-      res.status(403).json({ error: 'Move this note to trash before permanently deleting it.' })
+      res.status(403).json({ error: 'Only the owner can delete this note.' })
       return
     }
     // A shared note belongs to its owner. Permanently deleting it from a
@@ -1049,11 +1114,13 @@ app.post('/api/notes/:id/members', requireAuth, (req, res) => {
     res.status(404).json({ error: 'No account has that ID.' })
     return
   }
-  const role = req.body?.role === 'viewer' ? 'viewer' : 'editor'
+  const { role, canComment } = cleanMemberPermissions(req.body)
   db.prepare(
-    `INSERT INTO note_members (note_id, user_id, role, created_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(note_id, user_id) DO UPDATE SET role = excluded.role`,
-  ).run(req.params.id, targetId, role, Date.now())
+    `INSERT INTO note_members (note_id, user_id, role, can_comment, created_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(note_id, user_id) DO UPDATE SET
+       role = excluded.role, can_comment = excluded.can_comment`,
+  ).run(req.params.id, targetId, role, canComment, Date.now())
   if (role === 'viewer') disconnectNoteUser(req.params.id, targetId, 4003)
   pushNotesForNote(req.params.id)
   scheduleAdminPush()
@@ -1092,17 +1159,23 @@ app.patch('/api/notes/:id/members/:userId', requireAuth, (req, res) => {
   }
   const targetId = req.params.userId
   if (targetId === access.ownerId) {
-    res.status(400).json({ error: 'The owner’s role cannot be changed.' })
+    res.status(400).json({ error: 'The owner’s permissions cannot be changed.' })
     return
   }
-  const role = req.body?.role === 'viewer' ? 'viewer' : 'editor'
-  const result = db
-    .prepare('UPDATE note_members SET role = ? WHERE note_id = ? AND user_id = ?')
-    .run(role, req.params.id, targetId)
-  if (Number(result.changes) === 0) {
+  const existing = db
+    .prepare('SELECT role, can_comment FROM note_members WHERE note_id = ? AND user_id = ?')
+    .get(req.params.id, targetId)
+  if (!existing) {
     res.status(404).json({ error: 'That person is not on this note.' })
     return
   }
+  const { role, canComment } = cleanMemberPermissions(req.body, {
+    edit: existing.role !== 'viewer',
+    comment: existing.can_comment !== 0,
+  })
+  db.prepare(
+    'UPDATE note_members SET role = ?, can_comment = ? WHERE note_id = ? AND user_id = ?',
+  ).run(role, canComment, req.params.id, targetId)
   if (role === 'viewer') disconnectNoteUser(req.params.id, targetId, 4003)
   pushNotesForNote(req.params.id)
   res.json({ members: membersOf(req.params.id) })
@@ -1912,9 +1985,35 @@ setConnectionAuthorizer((conn) => {
   if (!conn.noteId) return { read: true, write: true }
   const access = accessFor(conn.noteId, conn.user?.userId)
   if (!access?.role) return { read: false, write: false, code: 4403 }
+  const note = db.prepare('SELECT trashed FROM notes WHERE id = ?').get(conn.noteId)
+  if (!note) return { read: false, write: false, code: 4403 }
+  if (note.trashed === 1 && access.role !== 'owner') {
+    return { read: true, write: false }
+  }
   return {
     read: true,
-    write: access.role !== 'viewer' && canWriteNote(conn.noteId, conn.sessionHash),
+    write: access.permissions.edit && canWriteNote(conn.noteId, conn.sessionHash),
+  }
+})
+
+// Only the owner may trash or restore a note. Editors still can edit an active
+// note, but a write that would change its trash state is rejected before it is
+// merged into the live room and saved.
+setUpdateAuthorizer((conn, doc, update) => {
+  if (conn.publicShare) return false
+  const access = accessFor(conn.noteId, conn.user?.userId)
+  if (!access?.permissions.edit) return false
+  if (access.role === 'owner') return true
+  const before = doc.getMap('meta').get('trashed') === true
+  const probe = new Y.Doc()
+  try {
+    Y.applyUpdate(probe, Y.encodeStateAsUpdate(doc))
+    Y.applyUpdate(probe, update)
+    return (probe.getMap('meta').get('trashed') === true) === before
+  } catch {
+    return false
+  } finally {
+    probe.destroy()
   }
 })
 

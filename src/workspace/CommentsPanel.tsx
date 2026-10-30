@@ -3,7 +3,7 @@ import { Modal } from '../components/Modal'
 import { CheckIcon, TrashIcon } from '../components/Icons'
 import { api } from '../lib/api'
 import { colorFor, formatTime, initials } from '../lib/notes'
-import type { Member, NoteComment, Role } from '../lib/types'
+import type { Member, MemberPermissions, NoteComment, Role } from '../lib/types'
 
 interface CommentsPanelProps {
   open: boolean
@@ -17,8 +17,9 @@ interface CommentsPanelProps {
   loading: boolean
   error: string | null
   busy: boolean
+  canComment: boolean
   onAdd: (body: string, mentions: string[]) => Promise<unknown>
-  onInvite: (userId: string, role: Exclude<Role, 'owner'>) => Promise<unknown>
+  onInvite: (userId: string, permissions: MemberPermissions) => Promise<unknown>
   onResolve: (id: string, resolved: boolean) => Promise<unknown>
   onDelete: (id: string) => Promise<unknown>
   onRefresh: () => void
@@ -125,6 +126,7 @@ export function CommentsPanel({
   loading,
   error,
   busy,
+  canComment,
   onAdd,
   onInvite,
   onResolve,
@@ -287,12 +289,12 @@ export function CommentsPanel({
     insertMention(candidate, mentionQuery.start, mentionQuery.end)
   }
 
-  const confirmInvite = async (role: Exclude<Role, 'owner'>) => {
+  const confirmInvite = async (permissions: MemberPermissions) => {
     if (!pendingInvite || inviteBusy) return
     setInviteBusy(true)
     setLocalError(null)
     try {
-      await onInvite(pendingInvite.candidate.userId, role)
+      await onInvite(pendingInvite.candidate.userId, permissions)
       insertMention(pendingInvite.candidate, pendingInvite.start, pendingInvite.end)
     } catch (caught) {
       setLocalError(caught instanceof Error ? caught.message : 'Could not add that person.')
@@ -378,8 +380,10 @@ export function CommentsPanel({
       <div className="comments">
         <div className="comments__intro">
           <p className="modal__lede">
-            Talk about <strong>{noteTitle || 'this note'}</strong> without changing the writing.
-            Type @ to mention someone and put it in their inbox.
+            Talk about <strong>{noteTitle || 'this note'}</strong> without changing the writing.{' '}
+            {canComment
+              ? 'Type @ to mention someone and put it in their inbox.'
+              : 'Commenting is read-only for you on this note.'}
           </p>
           {resolvedCount > 0 ? (
             <button
@@ -403,7 +407,11 @@ export function CommentsPanel({
           {!loading && visible.length === 0 ? (
             <div className="comments__empty">
               <p>No comments yet.</p>
-              <span>Start a conversation about this note.</span>
+              <span>
+                {canComment
+                  ? 'Start a conversation about this note.'
+                  : 'The owner controls who can comment on this note.'}
+              </span>
             </div>
           ) : null}
           {visible.map((comment) => (
@@ -425,7 +433,9 @@ export function CommentsPanel({
                 </span>
                 {comment.resolvedAt ? <span className="comment__resolved">Resolved</span> : null}
                 <span className="comment__actions">
-                  {(isOwner || comment.authorId === currentUserId) && !comment.resolvedAt ? (
+                  {canComment &&
+                  (isOwner || comment.authorId === currentUserId) &&
+                  !comment.resolvedAt ? (
                     <button
                       type="button"
                       className="icon-btn icon-btn--tiny"
@@ -436,7 +446,9 @@ export function CommentsPanel({
                       <CheckIcon size={14} />
                     </button>
                   ) : null}
-                  {(isOwner || comment.authorId === currentUserId) && comment.resolvedAt ? (
+                  {canComment &&
+                  (isOwner || comment.authorId === currentUserId) &&
+                  comment.resolvedAt ? (
                     <button
                       type="button"
                       className="link link--tiny"
@@ -445,7 +457,7 @@ export function CommentsPanel({
                       Reopen
                     </button>
                   ) : null}
-                  {isOwner || comment.authorId === currentUserId ? (
+                  {canComment && (isOwner || comment.authorId === currentUserId) ? (
                     <button
                       type="button"
                       className="icon-btn icon-btn--tiny icon-btn--danger"
@@ -461,20 +473,12 @@ export function CommentsPanel({
               <p className="comment__body">
                 <CommentBody comment={comment} />
               </p>
-              {comment.mentions.length > 0 ? (
-                <div className="comment__mentions">
-                  {comment.mentions.map((mention) => (
-                    <span key={mention.userId} className="tag tag--sm">
-                      @{mention.displayName}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
             </article>
           ))}
         </div>
 
-        <div className="comment-compose">
+        {canComment ? (
+          <div className="comment-compose">
           <div className="comment-compose__editor" ref={composerRef}>
             <textarea
               ref={textareaRef}
@@ -576,7 +580,7 @@ export function CommentsPanel({
                 <button
                   type="button"
                   className="btn btn--ghost btn--sm"
-                  onClick={() => void confirmInvite('viewer')}
+                  onClick={() => void confirmInvite({ edit: false, comment: true })}
                   disabled={inviteBusy}
                 >
                   {inviteBusy ? 'Adding…' : 'Add as viewer'}
@@ -584,7 +588,7 @@ export function CommentsPanel({
                 <button
                   type="button"
                   className="btn btn--primary btn--sm"
-                  onClick={() => void confirmInvite('editor')}
+                  onClick={() => void confirmInvite({ edit: true, comment: true })}
                   disabled={inviteBusy}
                 >
                   {inviteBusy ? 'Adding…' : 'Add as editor'}
@@ -613,6 +617,11 @@ export function CommentsPanel({
             </button>
           </div>
         </div>
+        ) : (
+          <p className="comment-compose__readonly">
+            The note owner has turned off commenting for you. You can still read this thread.
+          </p>
+        )}
 
         {error ? (
           <button type="button" className="link link--tiny" onClick={onRefresh}>

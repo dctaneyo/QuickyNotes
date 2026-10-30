@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, type CSSProperties } from 'react'
 import type * as Y from 'yjs'
 import { blockArray, blockTextNode, blockView, applyTextEdit } from '../sync/noteModel'
 import { formatSignature, formatTextMetrics, formatTextStyle } from '../lib/formatting'
+import { markdownTypeAfterInput, markdownTypeForMarker } from '../lib/markdown'
 import type { BlockType } from '../lib/types'
 import { RemoteCarets } from './RemoteCaret'
 import { filterSlash } from './SlashMenu'
@@ -63,20 +64,6 @@ interface BlockRowProps {
     blockId: string,
     controller: BlockKeyboardController | null,
   ) => void
-}
-
-const MARKDOWN_TRIGGERS: Record<string, BlockType> = {
-  '#': 'h1',
-  '##': 'h2',
-  '###': 'h3',
-  '-': 'bullet',
-  '*': 'bullet',
-  '1.': 'number',
-  '[]': 'todo',
-  '[ ]': 'todo',
-  '>': 'quote',
-  '```': 'code',
-  '---': 'divider',
 }
 
 const CONTINUES: Partial<Record<BlockType, BlockType>> = {
@@ -230,9 +217,33 @@ export function BlockRow({
     }
   }
 
+  const applyMarkdownShortcut = (el: HTMLTextAreaElement, type: BlockType) => {
+    doc.transact(() => {
+      text.delete(0, text.length)
+      block.set('type', type)
+      block.set('checked', false)
+    })
+    el.value = ''
+    el.setSelectionRange(0, 0)
+    autoGrow(el)
+    api.setSlash(null)
+    onEdited()
+    if (type === 'divider') {
+      const nextId = api.insertAfter(index, { type: 'text', text: '', indent: view.indent })
+      api.requestFocus(nextId, 'start')
+      return
+    }
+    onFocusBlock(view.id, 0)
+  }
+
   const handleInput = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (readOnly) return
     const el = event.currentTarget
+    const markdownType = view.type === 'text' ? markdownTypeAfterInput(el.value) : null
+    if (markdownType) {
+      applyMarkdownShortcut(el, markdownType)
+      return
+    }
     applyTextEdit(text, el.value)
     autoGrow(el)
     maybeOpenSlash(el)
@@ -249,24 +260,17 @@ export function BlockRow({
     const start = el.selectionStart ?? el.value.length
     const end = el.selectionEnd ?? start
     const next = el.value.slice(0, start) + value + el.value.slice(end)
+    const markdownType = view.type === 'text' ? markdownTypeAfterInput(next) : null
+    if (markdownType) {
+      applyMarkdownShortcut(el, markdownType)
+      scheduleFocusRestore()
+      return
+    }
     el.value = next
     applyTextEdit(text, next)
     const caret = start + value.length
     el.setSelectionRange(caret, caret)
     autoGrow(el)
-
-    // Keep the same space-triggered markdown shortcuts as a hardware keyboard.
-    if (value === ' ' && view.type === 'text') {
-      const trigger = next.trim()
-      const type = MARKDOWN_TRIGGERS[trigger]
-      if (type && next.length === trigger.length) {
-        text.delete(0, text.length)
-        block.set('type', type)
-        el.value = ''
-        el.setSelectionRange(0, 0)
-        autoGrow(el)
-      }
-    }
 
     maybeOpenSlash(el)
     onFocusBlock(view.id, el.selectionEnd)
@@ -479,14 +483,16 @@ export function BlockRow({
       }
     }
 
-    if (event.key === ' ' && view.type === 'text') {
-      const trigger = el.value.trim()
-      const type = MARKDOWN_TRIGGERS[trigger]
-      if (type && el.value.length === trigger.length) {
+    if (
+      event.key === ' ' &&
+      view.type === 'text' &&
+      el.selectionStart === el.value.length &&
+      el.selectionEnd === el.value.length
+    ) {
+      const markdownType = markdownTypeForMarker(el.value)
+      if (markdownType) {
         event.preventDefault()
-        text.delete(0, text.length)
-        block.set('type', type)
-        onEdited()
+        applyMarkdownShortcut(el, markdownType)
         return
       }
     }

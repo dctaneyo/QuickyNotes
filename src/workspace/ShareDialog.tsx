@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Modal } from '../components/Modal'
 import { TrashIcon } from '../components/Icons'
 import { api } from '../lib/api'
-import { colorFor, initials } from '../lib/notes'
-import type { Member, NoteSummary, Role } from '../lib/types'
+import { colorFor, initials, memberPermissions } from '../lib/notes'
+import type { Member, MemberPermissions, NoteSummary } from '../lib/types'
 
 interface UserResult {
   userId: string
@@ -19,12 +19,14 @@ interface ShareDialogProps {
   error: string | null
   currentUserId: string
   token: string | null
-  onInvite: (userId: string, role: Exclude<Role, 'owner'>) => Promise<void>
-  onChangeRole: (userId: string, role: Exclude<Role, 'owner'>) => Promise<void>
+  onInvite: (userId: string, permissions: MemberPermissions) => Promise<void>
+  onChangePermissions: (userId: string, permissions: MemberPermissions) => Promise<void>
   onTogglePublic: (enabled: boolean) => Promise<void>
   onRemove: (userId: string) => Promise<void>
   onLeave: () => Promise<void>
 }
+
+const DEFAULT_PERMISSIONS: MemberPermissions = { edit: true, comment: true }
 
 export function ShareDialog({
   open,
@@ -36,7 +38,7 @@ export function ShareDialog({
   currentUserId,
   token,
   onInvite,
-  onChangeRole,
+  onChangePermissions,
   onTogglePublic,
   onRemove,
   onLeave,
@@ -46,7 +48,8 @@ export function ShareDialog({
   const [searching, setSearching] = useState(false)
   const [active, setActive] = useState(-1)
   const [busy, setBusy] = useState(false)
-  const [role, setRole] = useState<Exclude<Role, 'owner'>>('editor')
+  const [permissions, setPermissions] = useState<MemberPermissions>(DEFAULT_PERMISSIONS)
+  const [pendingMember, setPendingMember] = useState<string | null>(null)
   const [publicBusy, setPublicBusy] = useState(false)
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -61,7 +64,8 @@ export function ShareDialog({
       setResults([])
       setActive(-1)
       setSearching(false)
-      setRole('editor')
+      setPermissions(DEFAULT_PERMISSIONS)
+      setPendingMember(null)
       setPublicBusy(false)
       setCopyMessage(null)
       setLocalError(null)
@@ -115,10 +119,11 @@ export function ShareDialog({
     setBusy(true)
     setLocalError(null)
     try {
-      await onInvite(userId, role)
+      await onInvite(userId, permissions)
       setQuery('')
       setResults([])
       setActive(-1)
+      setPermissions(DEFAULT_PERMISSIONS)
     } catch (caught) {
       setLocalError(caught instanceof Error ? caught.message : 'Could not invite that person.')
     } finally {
@@ -126,11 +131,28 @@ export function ShareDialog({
     }
   }
 
+  const updateMember = async (member: Member, patch: Partial<MemberPermissions>) => {
+    if (pendingMember) return
+    const next = { ...memberPermissions(member), ...patch }
+    setPendingMember(member.userId)
+    setLocalError(null)
+    try {
+      await onChangePermissions(member.userId, next)
+    } catch (caught) {
+      setLocalError(
+        caught instanceof Error ? caught.message : 'Could not change those permissions.',
+      )
+    } finally {
+      setPendingMember(null)
+    }
+  }
+
   return (
     <Modal open={open} title="Share this note" onClose={onClose} size="sm">
       <p className="modal__lede">
-        Invite people by name or 8-digit ID. Editors write together in realtime; viewers can read
-        and comment without changing the note.
+        {isOwner
+          ? 'Invite people by name or 8-digit ID. You choose whether each person can edit and comment. Only you can delete, restore, lock or publicly share this note.'
+          : 'Everyone who can open this note is listed below. The owner controls editing, commenting and sharing.'}
       </p>
 
       {isOwner ? (
@@ -177,15 +199,6 @@ export function ShareDialog({
                 }
               }}
             />
-            <select
-              className="input share-role"
-              value={role}
-              onChange={(event) => setRole(event.target.value === 'viewer' ? 'viewer' : 'editor')}
-              aria-label="Role for invited person"
-            >
-              <option value="editor">Can edit</option>
-              <option value="viewer">Can view</option>
-            </select>
             <button
               type="button"
               className="btn btn--primary"
@@ -196,6 +209,30 @@ export function ShareDialog({
             >
               {busy ? 'Inviting…' : 'Invite'}
             </button>
+          </div>
+
+          <div className="invite-permissions" aria-label="Permissions for invited person">
+            <span className="invite-permissions__label">Give them</span>
+            <label className="permission-check">
+              <input
+                type="checkbox"
+                checked={permissions.edit}
+                onChange={(event) =>
+                  setPermissions((current) => ({ ...current, edit: event.target.checked }))
+                }
+              />
+              Can edit
+            </label>
+            <label className="permission-check">
+              <input
+                type="checkbox"
+                checked={permissions.comment}
+                onChange={(event) =>
+                  setPermissions((current) => ({ ...current, comment: event.target.checked }))
+                }
+              />
+              Can comment
+            </label>
           </div>
 
           {searching ? <p className="muted search-status">Searching…</p> : null}
@@ -247,52 +284,69 @@ export function ShareDialog({
         {!loading && members && members.length === 0 ? (
           <p className="muted">Only you, for now.</p>
         ) : null}
-        {members?.map((member) => (
-          <div key={member.userId} className="member">
-            <span className="avatar" style={{ background: colorFor(member.userId) }}>
-              {initials(member.displayName)}
-            </span>
-            <div className="member__text">
-              <span className="member__name">
-                {member.displayName}
-                {member.userId === currentUserId ? ' (you)' : ''}
+        {members?.map((member) => {
+          const can = memberPermissions(member)
+          return (
+            <div key={member.userId} className="member">
+              <span className="avatar" style={{ background: colorFor(member.userId) }}>
+                {initials(member.displayName)}
               </span>
-              <span className="member__id mono">{member.userId}</span>
+              <div className="member__text">
+                <span className="member__name">
+                  {member.displayName}
+                  {member.userId === currentUserId ? ' (you)' : ''}
+                </span>
+                <span className="member__id mono">{member.userId}</span>
+              </div>
+              {isOwner && member.role !== 'owner' ? (
+                <div
+                  className="member__permissions"
+                  aria-label={`Permissions for ${member.displayName}`}
+                >
+                  <label className="permission-check">
+                    <input
+                      type="checkbox"
+                      checked={can.edit}
+                      disabled={pendingMember === member.userId}
+                      onChange={(event) =>
+                        void updateMember(member, { edit: event.target.checked })
+                      }
+                    />
+                    Edit
+                  </label>
+                  <label className="permission-check">
+                    <input
+                      type="checkbox"
+                      checked={can.comment}
+                      disabled={pendingMember === member.userId}
+                      onChange={(event) =>
+                        void updateMember(member, { comment: event.target.checked })
+                      }
+                    />
+                    Comment
+                  </label>
+                </div>
+              ) : (
+                <span className="member__role">
+                  {member.role === 'owner'
+                    ? 'Owner'
+                    : `${can.edit ? 'Can edit' : 'Read only'}${can.comment ? ' · comment' : ''}`}
+                </span>
+              )}
+              {isOwner && member.role !== 'owner' ? (
+                <button
+                  type="button"
+                  className="icon-btn icon-btn--danger"
+                  onClick={() => void onRemove(member.userId)}
+                  aria-label={`Remove ${member.displayName}`}
+                  title="Remove"
+                >
+                  <TrashIcon size={16} />
+                </button>
+              ) : null}
             </div>
-            {isOwner && member.role !== 'owner' ? (
-              <select
-                className="input member__role member__role-select"
-                value={member.role === 'viewer' ? 'viewer' : 'editor'}
-                onChange={(event) => {
-                  const nextRole = event.target.value === 'viewer' ? 'viewer' : 'editor'
-                  setLocalError(null)
-                  void onChangeRole(member.userId, nextRole).catch((caught) => {
-                    setLocalError(
-                      caught instanceof Error ? caught.message : 'Could not change that role.',
-                    )
-                  })
-                }}
-                aria-label={`Role for ${member.displayName}`}
-              >
-                <option value="editor">Editor</option>
-                <option value="viewer">Viewer</option>
-              </select>
-            ) : (
-              <span className="member__role">{member.role}</span>
-            )}
-            {isOwner && member.role !== 'owner' ? (
-              <button
-                type="button"
-                className="icon-btn icon-btn--danger"
-                onClick={() => void onRemove(member.userId)}
-                aria-label={`Remove ${member.displayName}`}
-                title="Remove"
-              >
-                <TrashIcon size={16} />
-              </button>
-            ) : null}
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {isOwner ? (

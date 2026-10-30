@@ -3,7 +3,7 @@ import type { SessionUser } from '../lib/api'
 import type { Peer } from '../sync/useNoteSync'
 import { Calendar } from './Calendar'
 import {
-  MentionIcon,
+  BellIcon,
   NotesIcon,
   StarIcon,
   SunIcon,
@@ -97,8 +97,8 @@ export function Sidebar({
           )
         })}
         <button type="button" className="nav__item" onClick={onMentions}>
-          <MentionIcon size={16} />
-          <span className="nav__label">Mentions</span>
+          <BellIcon size={16} />
+          <span className="nav__label">Notifications</span>
           <span className={`nav__count mono${mentionCount > 0 ? ' nav__count--unread' : ''}`}>
             {mentionCount}
           </span>

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-test('upgrades a database created before parent and public links', () => {
+test('upgrades a database created before parent links and per-member permissions', () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'quicky-migration-'))
   const databasePath = path.join(dataDir, 'quicky-notes.sqlite')
 
@@ -28,6 +28,14 @@ test('upgrades a database created before parent and public links', () => {
         content    BLOB,
         text       TEXT NOT NULL DEFAULT '',
         tags       TEXT NOT NULL DEFAULT '[]'
+      ) STRICT;
+
+      CREATE TABLE note_members (
+        note_id    TEXT NOT NULL,
+        user_id    TEXT NOT NULL,
+        role       TEXT NOT NULL DEFAULT 'editor',
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (note_id, user_id)
       ) STRICT;
     `)
     oldDb.close()
@@ -54,6 +62,15 @@ test('upgrades a database created before parent and public links', () => {
       .map((column) => column.name)
     assert.ok(columns.includes('parent_id'))
     assert.ok(columns.includes('public_token'))
+    const memberColumns = migrated
+      .prepare('PRAGMA table_info(note_members)')
+      .all()
+      .map((column) => column.name)
+    assert.ok(memberColumns.includes('can_comment'))
+    const notificationTable = migrated
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'comment_notifications'")
+      .get()
+    assert.ok(notificationTable)
 
     const indexes = migrated.prepare('PRAGMA index_list(notes)').all()
     assert.ok(

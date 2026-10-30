@@ -1,4 +1,4 @@
-import type { BlockType, NoteSummary } from './types'
+import type { BlockType, Member, MemberPermissions, NoteSummary } from './types'
 
 export function uid(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -70,6 +70,18 @@ export function noteDay(note: NoteSummary): string {
 export function noteSnippet(note: NoteSummary): string {
   const clean = note.text.replace(/\s+/g, ' ').trim()
   return clean.length > 180 ? `${clean.slice(0, 180)}…` : clean
+}
+
+export function notePermissions(
+  note: Pick<NoteSummary, 'role' | 'permissions'>,
+): MemberPermissions {
+  return note.permissions ?? { edit: note.role !== 'viewer', comment: true }
+}
+
+export function memberPermissions(
+  member: Pick<Member, 'role' | 'permissions'>,
+): MemberPermissions {
+  return member.permissions ?? { edit: member.role !== 'viewer', comment: true }
 }
 
 export function effectiveTitle(note: Pick<NoteSummary, 'title' | 'text'>): string {

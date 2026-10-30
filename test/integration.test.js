@@ -67,7 +67,7 @@ async function signUp(base, displayName) {
   })
 }
 
-function makeUpdate(title, text) {
+function makeUpdate(title, text, options = {}) {
   const doc = new Y.Doc()
   doc.transact(() => {
     const meta = doc.getMap('meta')
@@ -75,7 +75,7 @@ function makeUpdate(title, text) {
     meta.set('tags', [])
     meta.set('due', new Date().toISOString().slice(0, 10))
     meta.set('starred', false)
-    meta.set('trashed', false)
+    meta.set('trashed', options.trashed === true)
     meta.set('ownerId', 'test-owner')
     meta.set('createdAt', Date.now())
     meta.set('updatedAt', Date.now())
@@ -101,23 +101,37 @@ function connectRaw(url) {
   const waiters = []
   let closeInfo = null
   const closeWaiters = []
+  const waitFor = (match) => {
+    const found = received.find(match)
+    if (found) return Promise.resolve(found)
+    return new Promise((resolve, reject) => {
+      const waiter = { match, resolve, reject, timer: null }
+      waiter.timer = setTimeout(() => {
+        const index = waiters.indexOf(waiter)
+        if (index !== -1) waiters.splice(index, 1)
+        reject(new Error('timed out waiting for a socket message'))
+      }, 5000)
+      waiters.push(waiter)
+    })
+  }
   ws.on('message', (raw) => {
     const bytes = new Uint8Array(raw)
     const decoder = decoding.createDecoder(bytes)
     const type = decoding.readVarUint(decoder)
-    const message = { type, decoder }
+    const message = { type, decoder, raw: bytes }
     received.push(message)
     for (const waiter of [...waiters]) {
-      if (waiter.type === type) {
-        waiters.splice(waiters.indexOf(waiter), 1)
-        waiter.resolve(message)
-      }
+      if (!waiter.match(message)) continue
+      waiters.splice(waiters.indexOf(waiter), 1)
+      clearTimeout(waiter.timer)
+      waiter.resolve(message)
     }
   })
   ws.on('close', (code, reason) => {
     closeInfo = { code, reason: String(reason) }
     for (const waiter of [...closeWaiters]) {
-      waiters.splice(closeWaiters.indexOf(waiter), 1)
+      closeWaiters.splice(closeWaiters.indexOf(waiter), 1)
+      clearTimeout(waiter.timer)
       waiter.resolve(closeInfo)
     }
   })
@@ -129,13 +143,27 @@ function connectRaw(url) {
     ws,
     opened,
     waitForType(type) {
-      const found = received.find((message) => message.type === type)
-      if (found) return Promise.resolve(found)
-      return new Promise((resolve) => waiters.push({ type, resolve }))
+      return waitFor((message) => message.type === type)
+    },
+    waitForSyncStep2() {
+      return waitFor((message) => {
+        if (message.type !== 0) return false
+        const decoder = decoding.createDecoder(message.raw)
+        decoding.readVarUint(decoder)
+        return decoding.readVarUint(decoder) === syncProtocol.messageYjsSyncStep2
+      })
     },
     waitForClose() {
       if (closeInfo) return Promise.resolve(closeInfo)
-      return new Promise((resolve) => closeWaiters.push({ resolve }))
+      return new Promise((resolve, reject) => {
+        const waiter = { resolve, timer: null }
+        waiter.timer = setTimeout(() => {
+          const index = closeWaiters.indexOf(waiter)
+          if (index !== -1) closeWaiters.splice(index, 1)
+          reject(new Error('timed out waiting for a socket close'))
+        }, 5000)
+        closeWaiters.push(waiter)
+      })
     },
   }
 }
@@ -145,6 +173,20 @@ function sendUpdate(ws, update) {
   encoding.writeVarUint(encoder, 0)
   syncProtocol.writeUpdate(encoder, update)
   ws.send(encoding.toUint8Array(encoder))
+}
+
+async function readCurrentDoc(socket) {
+  const doc = new Y.Doc()
+  const encoder = encoding.createEncoder()
+  encoding.writeVarUint(encoder, 0)
+  syncProtocol.writeSyncStep1(encoder, doc)
+  socket.ws.send(encoding.toUint8Array(encoder))
+  const message = await socket.waitForSyncStep2()
+  const decoder = decoding.createDecoder(message.raw)
+  decoding.readVarUint(decoder)
+  decoding.readVarUint(decoder)
+  Y.applyUpdate(doc, decoding.readVarUint8Array(decoder))
+  return doc
 }
 
 test('live note permissions, save acknowledgements, and revocation', async (t) => {
@@ -257,6 +299,15 @@ test('live note permissions, save acknowledgements, and revocation', async (t) =
       body: { userId: viewer.user.userId, role: 'viewer' },
     })
 
+    const editorNote = await request(base, `/api/notes/${noteId}`, editor.token)
+    assert.deepEqual(editorNote.note.permissions, { edit: true, comment: true })
+    const viewerNote = await request(base, `/api/notes/${noteId}`, viewer.token)
+    assert.deepEqual(viewerNote.note.permissions, { edit: false, comment: true })
+    await assert.rejects(
+      request(base, `/api/notes/${noteId}`, editor.token, { method: 'DELETE' }),
+      /403/,
+    )
+
     const viewerSocket = connectRaw(
       `ws://127.0.0.1:${port}/ws/note:${noteId}?token=${encodeURIComponent(viewer.token)}`,
     )
@@ -274,9 +325,55 @@ test('live note permissions, save acknowledgements, and revocation', async (t) =
     assert.equal(comment.comment.mentions[0].userId, viewer.user.userId)
     const inbox = await request(base, '/api/mentions', viewer.token)
     assert.equal(inbox.unread, 1)
+    assert.equal(inbox.mentions[0].mentioned, true)
+
+    // Everyone on the note gets a notification, even without an @mention.
+    const editorInbox = await request(base, '/api/mentions', editor.token)
+    assert.equal(editorInbox.unread, 1)
+    assert.equal(editorInbox.mentions[0].mentioned, false)
+
     await request(base, '/api/mentions/read', viewer.token, { method: 'POST', body: {} })
     const readInbox = await request(base, '/api/mentions', viewer.token)
     assert.equal(readInbox.unread, 0)
+
+    const generalComment = await request(base, `/api/notes/${noteId}/comments`, owner.token, {
+      method: 'POST',
+      body: { body: 'A general update for everyone.', mentions: [] },
+    })
+    const generalInbox = await request(base, '/api/mentions', viewer.token)
+    assert.equal(generalInbox.unread, 1)
+    assert.equal(generalInbox.mentions[0].mentioned, false)
+    assert.equal(generalInbox.mentions[0].body, 'A general update for everyone.')
+    await request(
+      base,
+      `/api/notes/${noteId}/comments/${generalComment.comment.id}`,
+      owner.token,
+      { method: 'DELETE' },
+    )
+    const afterDeleteInbox = await request(base, '/api/mentions', viewer.token)
+    assert.equal(afterDeleteInbox.unread, 0)
+    assert.equal(
+      afterDeleteInbox.mentions.some((item) => item.id === generalComment.comment.id),
+      false,
+    )
+
+    await request(base, `/api/notes/${noteId}/members/${viewer.user.userId}`, owner.token, {
+      method: 'PATCH',
+      body: { permissions: { edit: false, comment: false } },
+    })
+    const noComment = await request(base, `/api/notes/${noteId}`, viewer.token)
+    assert.deepEqual(noComment.note.permissions, { edit: false, comment: false })
+    await assert.rejects(
+      request(base, `/api/notes/${noteId}/comments`, viewer.token, {
+        method: 'POST',
+        body: { body: 'This should not post.' },
+      }),
+      /403/,
+    )
+    await request(base, `/api/notes/${noteId}/members/${viewer.user.userId}`, owner.token, {
+      method: 'PATCH',
+      body: { permissions: { edit: false, comment: true } },
+    })
 
     const published = await request(base, `/api/notes/${noteId}/public`, owner.token, {
       method: 'POST',
@@ -294,6 +391,29 @@ test('live note permissions, save acknowledgements, and revocation', async (t) =
     sendUpdate(publicSocket.ws, makeUpdate('Public edit', 'not allowed'))
     const publicClose = await publicSocket.waitForClose()
     assert.equal(publicClose.code, 4003)
+
+    const editorTrashProbe = connectRaw(
+      `ws://127.0.0.1:${port}/ws/note:${noteId}?token=${encodeURIComponent(editor.token)}`,
+    )
+    sockets.push(editorTrashProbe.ws)
+    await editorTrashProbe.opened
+    await editorTrashProbe.waitForType(MESSAGE_LOADED)
+    const editorTrashDoc = await readCurrentDoc(editorTrashProbe)
+    const beforeEdit = Y.encodeStateVector(editorTrashDoc)
+    const firstBlock = editorTrashDoc.getArray('blocks').get(0)
+    const blockText = firstBlock?.get('text')
+    assert.ok(blockText)
+    blockText.insert(blockText.length, ' editor')
+    sendUpdate(editorTrashProbe.ws, Y.encodeStateAsUpdate(editorTrashDoc, beforeEdit))
+    await editorTrashProbe.waitForType(MESSAGE_SAVED)
+
+    const beforeTrash = Y.encodeStateVector(editorTrashDoc)
+    editorTrashDoc.getMap('meta').set('trashed', true)
+    sendUpdate(editorTrashProbe.ws, Y.encodeStateAsUpdate(editorTrashDoc, beforeTrash))
+    const trashClose = await editorTrashProbe.waitForClose()
+    assert.equal(trashClose.code, 4003)
+    const stillActive = await request(base, `/api/notes/${noteId}`, owner.token)
+    assert.equal(stillActive.note.trashed, false)
 
     const editorSocket = connectRaw(
       `ws://127.0.0.1:${port}/ws/note:${noteId}?token=${encodeURIComponent(editor.token)}`,

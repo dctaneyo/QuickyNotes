@@ -118,10 +118,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS notes_updated ON notes(updated_at DESC);
 
   CREATE TABLE IF NOT EXISTS note_members (
-    note_id    TEXT NOT NULL REFERENCES notes(id) ON UPDATE CASCADE ON DELETE CASCADE,
-    user_id    TEXT NOT NULL REFERENCES users(user_id) ON UPDATE CASCADE ON DELETE CASCADE,
-    role       TEXT NOT NULL DEFAULT 'editor',
-    created_at INTEGER NOT NULL,
+    note_id     TEXT NOT NULL REFERENCES notes(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(user_id) ON UPDATE CASCADE ON DELETE CASCADE,
+    role        TEXT NOT NULL DEFAULT 'editor',
+    can_comment INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL,
     PRIMARY KEY (note_id, user_id)
   ) STRICT;
   CREATE INDEX IF NOT EXISTS note_members_user ON note_members(user_id);
@@ -150,6 +151,15 @@ db.exec(`
     PRIMARY KEY (comment_id, user_id)
   ) STRICT;
   CREATE INDEX IF NOT EXISTS comment_mentions_user ON comment_mentions(user_id, read_at);
+
+  CREATE TABLE IF NOT EXISTS comment_notifications (
+    comment_id TEXT NOT NULL REFERENCES note_comments(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(user_id) ON UPDATE CASCADE ON DELETE CASCADE,
+    read_at    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (comment_id, user_id)
+  ) STRICT;
+  CREATE INDEX IF NOT EXISTS comment_notifications_user
+    ON comment_notifications(user_id, read_at);
 
   CREATE TABLE IF NOT EXISTS note_history (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,6 +199,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS templates_user ON templates(user_id, updated_at DESC);
 `)
 
+// Keep existing mention alerts for databases created before general comment
+// notifications existed. New comments notify the whole note audience.
+db.exec(`
+  INSERT OR IGNORE INTO comment_notifications (comment_id, user_id, read_at)
+  SELECT comment_id, user_id, read_at FROM comment_mentions
+`)
+
 // Lightweight migration for user rows created before suspension existed.
 const userColumns = db.prepare('PRAGMA table_info(users)').all().map((column) => column.name)
 if (!userColumns.includes('suspended_at')) {
@@ -211,6 +228,16 @@ if (!noteColumns.includes('parent_id')) {
 }
 if (!noteColumns.includes('public_token')) {
   db.exec('ALTER TABLE notes ADD COLUMN public_token TEXT')
+}
+
+// Existing members keep the ability to comment they had before permissions
+// were split into independent editing and commenting controls.
+const memberColumns = db
+  .prepare('PRAGMA table_info(note_members)')
+  .all()
+  .map((column) => column.name)
+if (!memberColumns.includes('can_comment')) {
+  db.exec('ALTER TABLE note_members ADD COLUMN can_comment INTEGER NOT NULL DEFAULT 1')
 }
 // This index must follow the column migration: existing databases do not gain
 // columns from CREATE TABLE IF NOT EXISTS.

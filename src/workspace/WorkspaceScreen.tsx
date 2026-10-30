@@ -10,7 +10,7 @@ import {
   todayKey,
   uid,
 } from '../lib/notes'
-import type { Filter, Member, NoteSummary, Role, ViewId } from '../lib/types'
+import type { Filter, Member, MemberPermissions, NoteSummary, ViewId } from '../lib/types'
 import { encodeSeed, blockViews, noteMeta } from '../sync/noteModel'
 import { useNoteSync } from '../sync/useNoteSync'
 import { useLobby } from '../sync/useLobby'
@@ -499,29 +499,29 @@ export function WorkspaceScreen() {
     showToast(target.role === 'owner' ? 'Permanently deleted' : 'Removed from your trash')
   }
 
-  const invite = async (userId: string, role: Exclude<Role, 'owner'>) => {
+  const invite = async (userId: string, permissions: MemberPermissions) => {
     if (!selected || !token) return
     const result = await api<{ members: Member[] }>(`/api/notes/${selected.id}/members`, {
       method: 'POST',
       token,
-      body: { userId, role },
+      body: { userId, permissions },
     })
     index.updateSummary({
       ...selected,
       memberCount: result.members.length,
       members: result.members,
     })
-    showToast(role === 'viewer' ? 'Invited as a viewer' : 'Invited to this note')
+    showToast('Invited to this note')
   }
 
-  const changeRole = async (userId: string, role: Exclude<Role, 'owner'>) => {
+  const changePermissions = async (userId: string, permissions: MemberPermissions) => {
     if (!selected || !token) return
     const result = await api<{ members: Member[] }>(
       `/api/notes/${selected.id}/members/${userId}`,
-      { method: 'PATCH', token, body: { role } },
+      { method: 'PATCH', token, body: { permissions } },
     )
     index.updateSummary({ ...selected, members: result.members })
-    showToast(role === 'viewer' ? 'Changed to viewer' : 'Changed to editor')
+    showToast('Permissions updated')
   }
 
   const togglePublic = async (enabled: boolean) => {
@@ -738,7 +738,7 @@ export function WorkspaceScreen() {
           currentUserId={user?.userId ?? ''}
           token={token}
           onInvite={invite}
-          onChangeRole={changeRole}
+          onChangePermissions={changePermissions}
           onTogglePublic={togglePublic}
           onRemove={removeMember}
           onLeave={leaveNote}
@@ -756,7 +756,7 @@ export function WorkspaceScreen() {
 
       <ConfirmDialog
         open={!!pendingDelete}
-        title="Permanently delete?"
+        title={pendingDelete?.role === 'owner' ? 'Permanently delete?' : 'Remove from your trash?'}
         body={
           pendingDelete
             ? pendingDelete.role === 'owner'
@@ -764,7 +764,7 @@ export function WorkspaceScreen() {
               : `“${effectiveTitle(pendingDelete)}” will be removed from your trash. The owner’s copy stays. This cannot be undone.`
             : ''
         }
-        confirmLabel="Permanently delete"
+        confirmLabel={pendingDelete?.role === 'owner' ? 'Permanently delete' : 'Remove from my trash'}
         onConfirm={confirmDelete}
         onClose={() => setPendingDelete(null)}
       />

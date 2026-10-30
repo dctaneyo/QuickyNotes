@@ -15,6 +15,13 @@ export type BlockType =
 
 export type Role = 'owner' | 'editor' | 'viewer'
 
+export interface MemberPermissions {
+  /** Can change the note body and metadata. */
+  edit: boolean
+  /** Can post, resolve and delete comments. */
+  comment: boolean
+}
+
 export interface NoteSummary {
   id: string
   title: string
@@ -29,6 +36,8 @@ export interface NoteSummary {
   ownerId: string
   ownerName: string
   role: Role
+  /** Optional so notes cached by older clients still load safely. */
+  permissions?: MemberPermissions
   memberCount: number
   /** Read-only because the owner locked it. */
   locked?: boolean
@@ -49,6 +58,8 @@ export interface Member {
   userId: string
   displayName: string
   role: Role
+  /** Optional so member lists cached by older clients still load safely. */
+  permissions?: MemberPermissions
 }
 
 export type ViewId = 'today' | 'all' | 'starred' | 'trash'
@@ -105,4 +116,6 @@ export interface MentionItem {
   body: string
   createdAt: number
   readAt: number
+  /** True when this comment also explicitly @mentions the recipient. */
+  mentioned: boolean
 }

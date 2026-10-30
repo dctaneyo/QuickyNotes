@@ -128,7 +128,7 @@ export function pushComments(noteId) {
   }
 }
 
-/** Tell mentioned people to refresh their mention inbox. */
+/** Tell comment recipients to refresh their notification inbox. */
 export function pushMentions(userIds) {
   const audience = new Set(userIds)
   if (audience.size === 0) return

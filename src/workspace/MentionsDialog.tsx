@@ -42,9 +42,10 @@ export function MentionsDialog({
   }, [open, onMarkRead])
 
   return (
-    <Modal open={open} title="Mentions" onClose={onClose} size="sm">
+    <Modal open={open} title="Notifications" onClose={onClose} size="sm">
       <p className="modal__lede">
-        Comments where someone asked for your attention. Opening one jumps straight to the note.
+        New comments on notes you can access. Comments appear here even when nobody mentions you;
+        @mentions are highlighted inside the comment.
       </p>
       {error ? (
         <div className="comments__empty" role="alert">
@@ -54,11 +55,11 @@ export function MentionsDialog({
           </button>
         </div>
       ) : null}
-      {loading ? <p className="muted">Loading mentions…</p> : null}
+      {loading ? <p className="muted">Loading notifications…</p> : null}
       {!loading && !error && mentions.length === 0 ? (
         <div className="comments__empty">
-          <p>No mentions yet.</p>
-          <span>When someone writes @you in a comment, it appears here.</span>
+          <p>No notifications yet.</p>
+          <span>New comments on your shared notes appear here, whether or not you were mentioned.</span>
         </div>
       ) : null}
       <div className="mentions-list">
@@ -83,7 +84,14 @@ export function MentionsDialog({
                   <strong>{mention.authorName}</strong>
                   <span>{relativeTime(mention.createdAt)}</span>
                 </span>
-                <span className="mention-item__note">{note?.title || mention.noteTitle || 'A note'}</span>
+                <span className="mention-item__note">
+                  <span>{note?.title || mention.noteTitle || 'A note'}</span>
+                  <span
+                    className={`mention-item__kind${mention.mentioned ? ' is-mention' : ''}`}
+                  >
+                    {mention.mentioned ? 'Mentioned you' : 'New comment'}
+                  </span>
+                </span>
                 <span className="mention-item__body">{mention.body}</span>
               </span>
               {!mention.readAt ? <span className="mention-item__dot" aria-label="Unread" /> : null}

@@ -13,6 +13,7 @@ import {
 } from '../lib/formatting'
 import type { BlockType } from '../lib/types'
 import { SLASH_ITEMS } from './SlashMenu'
+import { MarkdownHelp } from './MarkdownHelp'
 
 export type FormatMode = 'docked' | 'keyboard'
 
@@ -54,6 +55,7 @@ export function FormatMenu({
   onReset,
 }: FormatMenuProps) {
   const [sizeDraft, setSizeDraft] = useState(format.fontSize ? String(format.fontSize) : '')
+  const [markdownHelpOpen, setMarkdownHelpOpen] = useState(false)
 
   useEffect(() => {
     setSizeDraft(format.fontSize ? String(format.fontSize) : '')
@@ -312,9 +314,31 @@ export function FormatMenu({
           <ResetFormatIcon size={16} />
         </button>
 
+        <span className="fmt-divider" aria-hidden="true" />
+
+        <button
+          type="button"
+          className="fmt-btn fmt-btn--help"
+          onClick={() => setMarkdownHelpOpen(true)}
+          aria-label="Markdown shortcuts"
+          aria-haspopup="dialog"
+          title="Markdown shortcuts"
+        >
+          <span className="fmt-help-glyph" aria-hidden="true">
+            ?
+          </span>
+        </button>
       </div>
     </div>
   )
 
-  return bar
+  return (
+    <>
+      {bar}
+      <MarkdownHelp
+        open={markdownHelpOpen}
+        onClose={() => setMarkdownHelpOpen(false)}
+      />
+    </>
+  )
 }

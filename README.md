@@ -35,8 +35,9 @@ WebSocket sync server and the built client — so it deploys as a single Railway
   format rail at the top; the board also has shift/caps, symbols, emoji, hold-to-delete, space-drag
   caret movement, undo/redo for blocks and a hide control. The real field stays focused underneath,
   so selection, collaborative carets and hardware keyboards keep working.
-- Slash menu (`/`) for block types, markdown shortcuts (`# `, `- `, `[] `, `> `, ` ``` `), Tab to
-  indent, Alt+↑/↓ to move a block, drag handle to reorder, undo/redo with `⌘Z`.
+- Slash menu (`/`) for block types, instant block shortcuts (`# `, `## `, `- `, `1. `, `[] `,
+  `> `, `! `, ` ``` `, `--- `) and a `?` guide in the format rail, Tab to indent,
+  Alt+↑/↓ to move a block, drag handle to reorder, undo/redo with `⌘Z`.
 - Every note belongs to a day. New notes start on today, and **Move** re-files one to another
   day; the Today view, day groups and calendar follow it. There is no deadline or overdue state.
 - Tags, star, trash and restore.
