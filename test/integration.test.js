@@ -235,6 +235,24 @@ test('live note permissions, save acknowledgements, and revocation', async (t) =
     const owner = await signUp(base, 'Owner')
     const editor = await signUp(base, 'Editor')
     const viewer = await signUp(base, 'Viewer')
+    // The lobby is presence-only, but y-websocket still completes the Yjs
+    // handshake. It must stay connected or the header badge loops between
+    // "Reconnecting" and "Synced" whenever no note is open.
+    const lobbySocket = connectRaw(
+      `ws://127.0.0.1:${port}/ws/lobby?token=${encodeURIComponent(owner.token)}`,
+    )
+    sockets.push(lobbySocket.ws)
+    await lobbySocket.opened
+    await lobbySocket.waitForType(MESSAGE_LOADED)
+    const lobbyDoc = new Y.Doc()
+    const lobbyHandshake = encoding.createEncoder()
+    encoding.writeVarUint(lobbyHandshake, 0)
+    syncProtocol.writeSyncStep2(lobbyHandshake, lobbyDoc)
+    lobbySocket.ws.send(encoding.toUint8Array(lobbyHandshake))
+    await sleep(300)
+    assert.equal(lobbySocket.ws.readyState, WebSocket.OPEN)
+    lobbyDoc.destroy()
+
     const noteId = randomUUID()
     await request(base, '/api/notes', owner.token, {
       method: 'POST',

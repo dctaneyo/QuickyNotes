@@ -2001,6 +2001,9 @@ setConnectionAuthorizer((conn) => {
 // merged into the live room and saved.
 setUpdateAuthorizer((conn, doc, update) => {
   if (conn.publicShare) return false
+  // The lobby is presence-only and has no note row to authorize. Rejecting its
+  // empty Yjs handshake closes the socket, making the status badge loop.
+  if (!conn.noteId) return true
   const access = accessFor(conn.noteId, conn.user?.userId)
   if (!access?.permissions.edit) return false
   if (access.role === 'owner') return true
