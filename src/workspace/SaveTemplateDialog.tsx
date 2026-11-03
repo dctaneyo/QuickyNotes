@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Modal } from '../components/Modal'
-import { useTouchKeyboardDevice } from '../hooks/useTouchKeyboard'
 
 interface SaveTemplateDialogProps {
   open: boolean
@@ -20,7 +19,6 @@ export function SaveTemplateDialog({
   const [name, setName] = useState(defaultName)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const touchKeyboard = useTouchKeyboardDevice()
 
   useEffect(() => {
     if (!open) return
@@ -83,7 +81,6 @@ export function SaveTemplateDialog({
             maxLength={60}
             required
             aria-required="true"
-            inputMode={touchKeyboard ? 'none' : undefined}
             autoFocus
             onChange={(event) => setName(event.target.value)}
           />

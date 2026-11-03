@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Modal } from '../components/Modal'
-import { useTouchKeyboardDevice } from '../hooks/useTouchKeyboard'
 
 interface LockNoteDialogProps {
   open: boolean
@@ -14,7 +13,7 @@ export function LockNoteDialog({ open, noteTitle, onClose, onLock }: LockNoteDia
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const touchKeyboard = useTouchKeyboardDevice()
+
 
   useEffect(() => {
     if (!open) return
@@ -86,7 +85,6 @@ export function LockNoteDialog({ open, noteTitle, onClose, onLock }: LockNoteDia
             value={password}
             maxLength={128}
             autoComplete="new-password"
-            inputMode={touchKeyboard ? 'none' : undefined}
             autoFocus
             onChange={(event) => setPassword(event.target.value)}
             onKeyDown={(event) => {
@@ -125,7 +123,7 @@ export function UnlockNoteDialog({ open, noteTitle, onClose, onUnlock }: UnlockN
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const touchKeyboard = useTouchKeyboardDevice()
+
 
   useEffect(() => {
     if (!open) return
@@ -183,7 +181,6 @@ export function UnlockNoteDialog({ open, noteTitle, onClose, onUnlock }: UnlockN
           value={password}
           maxLength={128}
           autoComplete="current-password"
-          inputMode={touchKeyboard ? 'none' : undefined}
           autoFocus
           onChange={(event) => setPassword(event.target.value)}
           onKeyDown={(event) => {

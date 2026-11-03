@@ -1,12 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useReducer,
-  useRef,
-  useState,
-  type CSSProperties,
-  type KeyboardEvent,
-} from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState, type KeyboardEvent } from 'react'
 import * as Y from 'yjs'
 import type { BlockType } from '../lib/types'
 import { formatTime } from '../lib/notes'
@@ -32,8 +24,7 @@ import {
 } from './BlockRow'
 import { SlashMenu, filterSlash } from './SlashMenu'
 import { FormatMenu } from './FormatMenu'
-import { OnscreenKeyboard } from '../components/keyboard/OnscreenKeyboard'
-import { useBlockKeyboard } from './useBlockKeyboard'
+import { useTouchDevice } from '../hooks/useTouchDevice'
 
 const NOOP = () => undefined
 
@@ -61,11 +52,7 @@ interface TemplateNoteEditorProps {
  */
 export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEditorProps) {
   const [doc] = useState(() => buildDoc(template))
-  const blockKeyboard = useBlockKeyboard()
-  const keyboardEnabled = blockKeyboard.enabled
-  const openKeyboard = blockKeyboard.open
-  const closeKeyboard = blockKeyboard.close
-  const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const touchDevice = useTouchDevice()
   const [, bump] = useReducer((value: number) => value + 1, 0)
   const [name, setName] = useState(template.name)
   const [title, setTitle] = useState(template.title)
@@ -113,12 +100,7 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
 
   const views = blockViews(doc)
   const activeView = views.find((view) => view.id === activeBlockId) ?? null
-  const keyboardOpen =
-    keyboardEnabled &&
-    blockKeyboard.activeBlockId !== null &&
-    blockKeyboard.activeBlockId === activeBlockId &&
-    activeView !== null &&
-    activeView.type !== 'divider'
+  const formatTrayOpen = touchDevice && activeView !== null && activeView.type !== 'divider'
 
   const orders: (number | null)[] = []
   const counters = [0, 0, 0, 0]
@@ -234,49 +216,14 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
     (blockId: string) => {
       setSlash(null)
       setActiveBlockId(blockId)
-      if (keyboardEnabled) openKeyboard(blockId)
       refocusBlock(blockId)
     },
-    [keyboardEnabled, openKeyboard, refocusBlock],
+    [refocusBlock],
   )
 
-  const dismissKeyboard = useCallback(() => {
-    closeKeyboard()
-    setKeyboardHeight(0)
-  }, [closeKeyboard])
-
-  const handleBlockFocus = useCallback(
-    (blockId: string | null) => {
-      if (!blockId) return
-      setActiveBlockId(blockId)
-      if (keyboardEnabled) openKeyboard(blockId)
-    },
-    [keyboardEnabled, openKeyboard],
-  )
-
-  useEffect(() => {
-    if (!keyboardOpen) return
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (!(target instanceof Element)) return
-      if (target.closest('.osk')) return
-      if (target.closest('.note__body textarea')) return
-      dismissKeyboard()
-    }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    return () => document.removeEventListener('pointerdown', onPointerDown, true)
-  }, [keyboardOpen, dismissKeyboard])
-
-  useEffect(() => {
-    if (!keyboardOpen || !blockKeyboard.activeBlockId || keyboardHeight <= 0) return
-    const frame = window.requestAnimationFrame(() => {
-      const row = document.querySelector<HTMLElement>(
-        `[data-block-id="${blockKeyboard.activeBlockId}"]`,
-      )
-      row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [keyboardOpen, blockKeyboard.activeBlockId, keyboardHeight])
+  const handleBlockFocus = useCallback((blockId: string | null) => {
+    if (blockId) setActiveBlockId(blockId)
+  }, [])
 
   const applyFormatType = (type: BlockType) => {
     if (!activeBlockId) return
@@ -403,12 +350,7 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
   return (
     <section
       ref={surfaceRef}
-      className={`note note--template${keyboardOpen ? ' has-keyboard' : ''}`}
-      style={
-        keyboardOpen
-          ? ({ '--kb-height': `${keyboardHeight}px` } as CSSProperties)
-          : undefined
-      }
+      className={`note note--template${formatTrayOpen ? ' has-format-tray' : ''}`}
       aria-label="Template editor"
       onKeyDown={onUndoKeys}
     >
@@ -471,10 +413,10 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
         </div>
       </div>
 
-      {!keyboardEnabled && activeView && activeView.type !== 'divider' ? (
-        <div className="note__format-dock">
+      {formatTrayOpen && activeView ? (
+        touchDevice ? (
           <FormatMenu
-            mode="docked"
+            mode="tray"
             type={activeView.type}
             indent={activeView.indent}
             format={activeView.format}
@@ -483,7 +425,20 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
             onFormat={applyFormatStyle}
             onReset={resetFormatStyle}
           />
-        </div>
+        ) : (
+          <div className="note__format-dock">
+            <FormatMenu
+              mode="docked"
+              type={activeView.type}
+              indent={activeView.indent}
+              format={activeView.format}
+              onType={applyFormatType}
+              onIndent={changeFormatIndent}
+              onFormat={applyFormatStyle}
+              onReset={resetFormatStyle}
+            />
+          </div>
+        )
       ) : null}
 
       <div className="note__scroll">
@@ -542,8 +497,6 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
               api={api}
               onEdited={NOOP}
               onFocusBlock={handleBlockFocus}
-              customKeyboard={keyboardEnabled}
-              registerKeyboard={blockKeyboard.register}
             />
           ))}
           <button
@@ -567,35 +520,6 @@ export function TemplateNoteEditor({ template, onSave, onDone }: TemplateNoteEdi
           <span className="note__footer-right">Template · autosaves</span>
         </footer>
       </div>
-
-      {keyboardOpen ? (
-        <OnscreenKeyboard
-          label={activeView ? `${activeView.type} block` : 'Template'}
-          formatBar={
-            activeView ? (
-              <FormatMenu
-                mode="keyboard"
-                type={activeView.type}
-                indent={activeView.indent}
-                format={activeView.format}
-                onType={applyFormatType}
-                onIndent={changeFormatIndent}
-                onFormat={applyFormatStyle}
-                onReset={resetFormatStyle}
-              />
-            ) : undefined
-          }
-          onInsert={blockKeyboard.insert}
-          onBackspace={blockKeyboard.backspace}
-          onReturn={blockKeyboard.newline}
-          onMoveCaret={blockKeyboard.moveCaret}
-          onUndo={() => undoRef.current?.undo()}
-          onRedo={() => undoRef.current?.redo()}
-          onDismiss={dismissKeyboard}
-          onKeepFocus={blockKeyboard.refocus}
-          onHeightChange={setKeyboardHeight}
-        />
-      ) : null}
 
       {slash ? (
         <SlashMenu

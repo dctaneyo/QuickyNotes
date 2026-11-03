@@ -26,15 +26,12 @@ WebSocket sync server and the built client — so it deploys as a single Railway
 - Block editor: text, three heading levels, bulleted and numbered lists, to-dos, quotes, callouts,
   code and dividers.
 - **Format rail**: a single horizontal strip with block type, bold, italic, underline, strike,
-  custom font size, text colour, highlight, indentation and reset. It becomes a floating popover
-  on desktop, scrolls sideways when space is tight, and is stored on the block so it survives
-  collaboration, duplication and templates.
-- **Custom onscreen keyboard** on phones and tablets: every text field hides the native keyboard
-  and opens a paper-themed board — note and template blocks, titles, tags, search, settings, sharing,
-  admin fields and dialogs. Numeric fields open on the number layout. The block editor docks the
-  format rail at the top; the board also has shift/caps, symbols, emoji, hold-to-delete, space-drag
-  caret movement, undo/redo for blocks and a hide control. The real field stays focused underneath,
-  so selection, collaborative carets and hardware keyboards keep working.
+  custom font size, text colour, highlight, indentation and reset. It is docked above the editor
+  on desktop and becomes a floating tray on touch devices, scrolling sideways when space is tight;
+  formatting is stored on the block so it survives collaboration, duplication and templates.
+- **Native mobile keyboard**: phones and tablets use the system keyboard for every text field. The
+  format tray tracks the visible viewport so it sits directly above the native keyboard while you
+  write, keeping formatting controls within thumb reach without replacing the keyboard.
 - Slash menu (`/`) for block types, instant block shortcuts (`# `, `## `, `- `, `1. `, `[] `,
   `> `, `! `, ` ``` `, `--- `) and a `?` guide in the format rail, Tab to indent,
   Alt+↑/↓ to move a block, drag handle to reorder, undo/redo with `⌘Z`.

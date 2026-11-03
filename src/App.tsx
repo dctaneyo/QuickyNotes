@@ -1,5 +1,5 @@
 import { AuthProvider, useAuth } from './auth/AuthContext'
-import { MobileInputKeyboard } from './components/keyboard/MobileInputKeyboard'
+import { useNativeKeyboardInset } from './hooks/useNativeKeyboardInset'
 import { AuthScreen } from './screens/AuthScreen'
 import { PublicNoteScreen } from './screens/PublicNoteScreen'
 import { WorkspaceScreen } from './workspace/WorkspaceScreen'
@@ -23,20 +23,13 @@ function Gate() {
 }
 
 export default function App() {
+  useNativeKeyboardInset()
   const publicMatch = window.location.pathname.match(/^\/p\/([A-Za-z0-9]+)\/?$/)
-  if (publicMatch) {
-    return (
-      <>
-        <PublicNoteScreen shareToken={publicMatch[1]} />
-        <MobileInputKeyboard />
-      </>
-    )
-  }
+  if (publicMatch) return <PublicNoteScreen shareToken={publicMatch[1]} />
 
   return (
     <AuthProvider>
       <Gate />
-      <MobileInputKeyboard />
     </AuthProvider>
   )
 }

@@ -15,7 +15,7 @@ import type { BlockType } from '../lib/types'
 import { SLASH_ITEMS } from './SlashMenu'
 import { MarkdownHelp } from './MarkdownHelp'
 
-export type FormatMode = 'docked' | 'keyboard'
+export type FormatMode = 'docked' | 'tray'
 
 interface FormatMenuProps {
   mode: FormatMode
@@ -90,7 +90,7 @@ export function FormatMenu({
   const bar = (
     <div
       className={`format-bar format-bar--${mode}`}
-      role={mode === 'keyboard' ? 'group' : 'region'}
+      role={mode === 'tray' ? 'group' : 'region'}
       aria-label={`Format ${BLOCK_LABELS[type]} block`}
       onPointerDown={(event) => {
         // Keep the caret in the block when a formatting button is pressed.
@@ -167,30 +167,22 @@ export function FormatMenu({
           >
             −
           </button>
-          {mode === 'keyboard' ? (
-            <span className="fmt-size__value" aria-hidden="true">
-              {format.fontSize ? `${format.fontSize}px` : 'Auto'}
-            </span>
-          ) : (
-            <label className="fmt-size__field">
-              <input
-                value={sizeDraft}
-                inputMode="numeric"
-                maxLength={2}
-                placeholder="Auto"
-                aria-label="Font size in pixels"
-                title="Font size in pixels. Leave empty for automatic."
-                onChange={(event) => setSizeDraft(event.target.value.replace(/[^\d]/g, ''))}
-                onBlur={commitSize}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.currentTarget.blur()
-                  }
-                }}
-              />
-              <span aria-hidden="true">px</span>
-            </label>
-          )}
+          <label className="fmt-size__field">
+            <input
+              value={sizeDraft}
+              inputMode="numeric"
+              maxLength={2}
+              placeholder="Auto"
+              aria-label="Font size in pixels"
+              title="Font size in pixels. Leave empty for automatic."
+              onChange={(event) => setSizeDraft(event.target.value.replace(/[^\d]/g, ''))}
+              onBlur={commitSize}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+              }}
+            />
+            <span aria-hidden="true">px</span>
+          </label>
           <button
             type="button"
             className="fmt-size__step"

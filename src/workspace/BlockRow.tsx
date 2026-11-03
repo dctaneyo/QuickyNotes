@@ -6,7 +6,6 @@ import { markdownTypeAfterInput, markdownTypeForMarker } from '../lib/markdown'
 import type { BlockType } from '../lib/types'
 import { RemoteCarets } from './RemoteCaret'
 import { filterSlash } from './SlashMenu'
-import type { BlockKeyboardController } from './useBlockKeyboard'
 
 export interface FocusRequest {
   blockId: string
@@ -57,13 +56,6 @@ interface BlockRowProps {
   onEdited: () => void
   onFocusBlock: (blockId: string | null, cursorIndex?: number) => void
   readOnly?: boolean
-  /** Hide the native mobile keyboard; the onscreen board drives this block. */
-  customKeyboard?: boolean
-  /** Lets the note surface send onscreen-keyboard actions to this block. */
-  registerKeyboard?: (
-    blockId: string,
-    controller: BlockKeyboardController | null,
-  ) => void
 }
 
 const CONTINUES: Partial<Record<BlockType, BlockType>> = {
@@ -117,23 +109,13 @@ export function BlockRow({
   onEdited,
   onFocusBlock,
   readOnly = false,
-  customKeyboard = false,
-  registerKeyboard,
 }: BlockRowProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const keyboardActionsRef = useRef<BlockKeyboardController | null>(null)
-  const focusRestoreTimer = useRef<number | null>(null)
   const text = blockTextNode(block)
   const view = blockView(block)
   const apiRef = useRef(api)
   apiRef.current = api
   const [, refreshBlock] = useReducer((value: number) => value + 1, 0)
-
-  useEffect(() => {
-    return () => {
-      if (focusRestoreTimer.current !== null) window.clearTimeout(focusRestoreTimer.current)
-    }
-  }, [])
 
   // Type, checkbox and indentation live on the map, so re-render on its changes
   // rather than waiting for an unrelated parent update.
@@ -250,194 +232,6 @@ export function BlockRow({
     onFocusBlock(view.id, el.selectionEnd)
     onEdited()
   }
-
-  /** Replace the current selection with text from the onscreen keyboard. */
-  const insertFromKeyboard = (value: string) => {
-    if (readOnly) return
-    const el = textareaRef.current
-    if (!el) return
-    if (document.activeElement !== el) el.focus({ preventScroll: true })
-    const start = el.selectionStart ?? el.value.length
-    const end = el.selectionEnd ?? start
-    const next = el.value.slice(0, start) + value + el.value.slice(end)
-    const markdownType = view.type === 'text' ? markdownTypeAfterInput(next) : null
-    if (markdownType) {
-      applyMarkdownShortcut(el, markdownType)
-      scheduleFocusRestore()
-      return
-    }
-    el.value = next
-    applyTextEdit(text, next)
-    const caret = start + value.length
-    el.setSelectionRange(caret, caret)
-    autoGrow(el)
-
-    maybeOpenSlash(el)
-    onFocusBlock(view.id, el.selectionEnd)
-    onEdited()
-    scheduleFocusRestore()
-  }
-
-  /**
-   * Safari can blur the textarea after the click that follows pointerup. Put
-   * the live caret back once more, without rewinding fast typing.
-   */
-  function scheduleFocusRestore() {
-    if (focusRestoreTimer.current !== null) window.clearTimeout(focusRestoreTimer.current)
-    focusRestoreTimer.current = window.setTimeout(() => {
-      focusRestoreTimer.current = null
-      const el = textareaRef.current
-      if (!el || !el.isConnected) return
-      // Do not reopen the board after it was dismissed or the note changed.
-      if (!document.querySelector('.note.has-keyboard')) return
-      const focused = document.activeElement
-      const focusIsOurs =
-        focused === el ||
-        focused === document.body ||
-        focused === document.documentElement ||
-        focused === null ||
-        (focused instanceof Element &&
-          focused.closest('.osk') !== null &&
-          !focused.matches('input, textarea, select'))
-      if (!focusIsOurs) return
-      const start = el.selectionStart ?? el.value.length
-      const end = el.selectionEnd ?? start
-      if (focused !== el) el.focus({ preventScroll: true })
-      try {
-        el.setSelectionRange(start, end)
-      } catch {
-        // Some block types do not expose a selection range.
-      }
-    }, 120)
-  }
-
-  /** Delete the selection, or the character immediately before the caret. */
-  const deleteFromKeyboard = () => {
-    if (readOnly) return
-    const el = textareaRef.current
-    if (!el) return
-    if (document.activeElement !== el) el.focus({ preventScroll: true })
-    const start = el.selectionStart ?? el.value.length
-    const end = el.selectionEnd ?? start
-    if (start !== end) {
-      insertFromKeyboard('')
-      return
-    }
-    if (start > 0) {
-      el.setSelectionRange(start - 1, start)
-      insertFromKeyboard('')
-      return
-    }
-    scheduleFocusRestore()
-    if (view.indent > 0) {
-      block.set('indent', view.indent - 1)
-      onEdited()
-      return
-    }
-    if (view.type !== 'text') {
-      block.set('type', 'text')
-      onEdited()
-      return
-    }
-    if (index > 0) mergeIntoPrevious()
-  }
-
-  /** Split the block like the Return key, keeping list and code behavior. */
-  const newlineFromKeyboard = () => {
-    if (readOnly) return
-    const el = textareaRef.current
-    if (!el) return
-    if (document.activeElement !== el) el.focus({ preventScroll: true })
-
-    if (slashOpen && api.slash) {
-      const choice = filterSlash(api.slash.query)[api.slash.index]
-      if (choice) applySlash(choice.type)
-      else api.setSlash(null)
-      return
-    }
-
-    const value = el.value
-    const start = el.selectionStart ?? value.length
-    const end = el.selectionEnd ?? start
-    if (view.type === 'code') {
-      el.setSelectionRange(start, end)
-      insertFromKeyboard('\n')
-      return
-    }
-    if (!value.trim() && LIST_TYPES.has(view.type)) {
-      const newId = api.insertAfter(index, {
-        type: view.type,
-        text: '',
-        indent: view.indent,
-      })
-      api.requestFocus(newId, 'start')
-      onEdited()
-      return
-    }
-    const before = value.slice(0, start)
-    const after = value.slice(end)
-    applyTextEdit(text, before)
-    const nextType = CONTINUES[view.type] ?? 'text'
-    const newId = api.insertAfter(index, { type: nextType, text: after, indent: view.indent })
-    api.requestFocus(newId, 'start')
-    onEdited()
-  }
-
-  const moveCaretFromKeyboard = (delta: number) => {
-    const el = textareaRef.current
-    if (!el) return
-    if (document.activeElement !== el) el.focus({ preventScroll: true })
-    const start = el.selectionStart ?? 0
-    const end = el.selectionEnd ?? start
-    const next =
-      start !== end
-        ? delta < 0
-          ? start
-          : end
-        : Math.max(0, Math.min(el.value.length, start + delta))
-    el.setSelectionRange(next, next)
-    onFocusBlock(view.id, next)
-    scheduleFocusRestore()
-  }
-
-  /** Return the caret to the block if a board key took focus from it. */
-  const refocusFromKeyboard = () => {
-    const el = textareaRef.current
-    if (!el) return
-    const start = el.selectionStart ?? el.value.length
-    const end = el.selectionEnd ?? start
-    if (document.activeElement !== el) el.focus({ preventScroll: true })
-    try {
-      el.setSelectionRange(start, end)
-    } catch {
-      // Some block types do not expose a selection range.
-    }
-  }
-
-  useEffect(() => {
-    keyboardActionsRef.current = {
-      insert: insertFromKeyboard,
-      backspace: deleteFromKeyboard,
-      newline: newlineFromKeyboard,
-      moveCaret: moveCaretFromKeyboard,
-      refocus: refocusFromKeyboard,
-      blur: () => textareaRef.current?.blur(),
-    }
-  })
-
-  useEffect(() => {
-    if (!registerKeyboard) return
-    const controller: BlockKeyboardController = {
-      insert: (value) => keyboardActionsRef.current?.insert(value),
-      backspace: () => keyboardActionsRef.current?.backspace(),
-      newline: () => keyboardActionsRef.current?.newline(),
-      moveCaret: (delta) => keyboardActionsRef.current?.moveCaret(delta),
-      refocus: () => keyboardActionsRef.current?.refocus(),
-      blur: () => keyboardActionsRef.current?.blur(),
-    }
-    registerKeyboard(view.id, controller)
-    return () => registerKeyboard(view.id, null)
-  }, [view.id, registerKeyboard])
 
   function mergeIntoPrevious() {
     const blocks = blockArray(doc)
@@ -760,8 +554,6 @@ export function BlockRow({
           placeholder={readOnly ? undefined : placeholderFor(view.type)}
           rows={1}
           spellCheck
-          inputMode={customKeyboard ? 'none' : undefined}
-          data-onscreen-keyboard="block"
           readOnly={readOnly}
           aria-readonly={readOnly}
           onChange={handleInput}
