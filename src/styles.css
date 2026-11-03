@@ -2486,15 +2486,26 @@ p {
 
 /* ---------- native keyboard format tray ---------- */
 
+/* Safari on iOS 26 draws its floating address pill above the keyboard but
+   inside the visual viewport. Reserve its height so the tray clears it. */
+html.is-ios-safari.has-native-keyboard {
+  --ios-safari-chrome-clearance: 52px;
+}
+
 html.has-native-keyboard .format-bar--tray {
-  bottom: calc(var(--keyboard-inset, 0px) + 8px);
+  bottom: calc(
+    var(--keyboard-inset, 0px) + var(--ios-safari-chrome-clearance, 0px) + 8px
+  );
 }
 
 .note.has-format-tray .note__scroll {
   padding-bottom: calc(
-    88px + var(--keyboard-inset, 0px) + env(safe-area-inset-bottom)
+    88px + var(--keyboard-inset, 0px) + var(--ios-safari-chrome-clearance, 0px) +
+      env(safe-area-inset-bottom)
   );
-  scroll-padding-bottom: calc(64px + var(--keyboard-inset, 0px));
+  scroll-padding-bottom: calc(
+    64px + var(--keyboard-inset, 0px) + var(--ios-safari-chrome-clearance, 0px)
+  );
 }
 
 .note.has-format-tray .block {

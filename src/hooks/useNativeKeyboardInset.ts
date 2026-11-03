@@ -18,8 +18,22 @@ export function useNativeKeyboardInset() {
     if (typeof window === 'undefined') return
     const root = document.documentElement
     const viewport = window.visualViewport
+    const userAgent = navigator.userAgent
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true
+    const isIosSafari =
+      /iPhone|iPod/.test(userAgent) &&
+      /Safari/.test(userAgent) &&
+      !/(CriOS|FxiOS|EdgiOS|OPiOS|OPT\/)/.test(userAgent) &&
+      !standalone
     let frame = 0
     let timers: number[] = []
+
+    // iOS 26 Safari floats its address pill inside the visual viewport, above
+    // the native keyboard. No viewport measurement includes that browser UI, so
+    // the stylesheet reserves room for it only on an iPhone in Safari.
+    if (isIosSafari) root.classList.add('is-ios-safari')
 
     const measure = () => {
       if (!viewport || viewport.scale > 1.01) return 0
@@ -93,7 +107,7 @@ export function useNativeKeyboardInset() {
       window.removeEventListener('scroll', onScroll)
       document.removeEventListener('scroll', onScroll, true)
       root.style.removeProperty('--keyboard-inset')
-      root.classList.remove('has-native-keyboard')
+      root.classList.remove('has-native-keyboard', 'is-ios-safari')
     }
   }, [])
 }
